@@ -1,10 +1,11 @@
+import argparse
+import asyncio
+
 from .server import serve
 
 
 def main():
     """MCP Fetch Server - HTTP fetching functionality for MCP"""
-    import argparse
-    import asyncio
 
     parser = argparse.ArgumentParser(
         description="give a model the ability to make web requests"
