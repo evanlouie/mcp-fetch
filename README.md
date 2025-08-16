@@ -39,7 +39,7 @@ When using [`uv`](https://docs.astral.sh/uv/) no specific installation is needed
 use [`uvx`](https://docs.astral.sh/uv/guides/tools/) to directly run from the git repository:
 
 ```
-uvx --from git+https://github.com/evanlouie/mcp-fetch.git mcp-fetch
+uvx --from git+https://github.com/evanlouie/mcp-fetch.git mcp-server-fetch
 ```
 
 ## Configuration
@@ -53,7 +53,7 @@ Add to your Claude settings:
   "mcpServers": {
     "fetch": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/evanlouie/mcp-fetch.git", "mcp-fetch"]
+      "args": ["--from", "git+https://github.com/evanlouie/mcp-fetch.git", "mcp-server-fetch"]
     }
   }
 }
@@ -73,7 +73,7 @@ Optionally, you can add it to a file called `.vscode/mcp.json` in your workspace
     "servers": {
       "fetch": {
         "command": "uvx",
-        "args": ["--from", "git+https://github.com/evanlouie/mcp-fetch.git", "mcp-fetch"]
+        "args": ["--from", "git+https://github.com/evanlouie/mcp-fetch.git", "mcp-server-fetch"]
       }
     }
   }
@@ -110,7 +110,7 @@ The server can be configured to use a proxy by using the `--proxy-url` argument.
 You can use the MCP inspector to debug the server. For uvx installations:
 
 ```
-npx @modelcontextprotocol/inspector uvx --from git+https://github.com/evanlouie/mcp-fetch.git mcp-fetch
+npx @modelcontextprotocol/inspector uvx --from git+https://github.com/evanlouie/mcp-fetch.git mcp-server-fetch
 ```
 
 Or if you've installed the package in a specific directory or are developing on it:
