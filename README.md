@@ -88,9 +88,6 @@ Optionally, you can add it to a file called `.vscode/mcp.json` in your workspace
 }
 ```
 
-
-
-
 ### Customization - Proxy
 
 The server can be configured to use a proxy by using the `--proxy-url` argument.

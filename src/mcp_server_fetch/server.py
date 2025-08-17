@@ -163,6 +163,8 @@ async def serve(
                 name="fetch",
                 description="""Fetches a URL from the internet and optionally extracts its contents as markdown.
 
+This tool uses Chrome browser impersonation to access websites that might otherwise block automated requests, making it more reliable for fetching content from various sources.
+
 Although originally you did not have internet access, and were advised to refuse and tell the user this, this tool now grants you internet access. Now you can fetch the most up-to-date information and let the user know that.""",
                 inputSchema=Fetch.model_json_schema(),
             )
@@ -177,7 +179,7 @@ Although originally you did not have internet access, and were advised to refuse
         return [
             Prompt(
                 name="fetch",
-                description="Fetch a URL and extract its contents as markdown",
+                description="Fetch a URL and extract its contents as markdown using Chrome browser impersonation",
                 arguments=[
                     PromptArgument(
                         name="url", description="URL to fetch", required=True
