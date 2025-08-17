@@ -3,7 +3,7 @@ from urllib.parse import urlparse, urlunparse
 
 import markdownify
 import readabilipy.simple_json
-from curl_cffi.requests import AsyncSession
+from curl_cffi.requests import AsyncSession, Response
 from curl_cffi.requests.exceptions import RequestException
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -20,10 +20,14 @@ from mcp.types import (
     Tool,
 )
 from protego import Protego
-from pydantic import AnyUrl, BaseModel, Field
+from pydantic import AnyUrl, BaseModel, Field, ValidationError
 
 DEFAULT_USER_AGENT_AUTONOMOUS = "ModelContextProtocol/1.0 (Autonomous; +https://github.com/modelcontextprotocol/servers)"
 DEFAULT_USER_AGENT_MANUAL = "ModelContextProtocol/1.0 (User-Specified; +https://github.com/modelcontextprotocol/servers)"
+
+
+class GetPromptArguments(BaseModel):
+    url: AnyUrl
 
 
 def extract_content_from_html(html: str) -> str:
@@ -37,14 +41,8 @@ def extract_content_from_html(html: str) -> str:
     )
     if not ret["content"]:
         return "<error>Page failed to be simplified from HTML</error>"
-    content = cast(
-        str,
-        markdownify.markdownify(
-            ret["content"],
-            heading_style=markdownify.ATX,
-        ),
-    )
-    return content
+    content = markdownify.markdownify(ret["content"], heading_style=markdownify.ATX)  # pyright: ignore[reportUnknownMemberType]
+    return cast(str, content)
 
 
 def get_robots_txt_url(url: str) -> str:
@@ -75,7 +73,7 @@ async def check_may_autonomously_fetch_url(
 
     robot_txt_url = get_robots_txt_url(url)
 
-    async with AsyncSession(impersonate="chrome") as session:
+    async with AsyncSession[Response](impersonate="chrome") as session:
         try:
             response = await session.get(
                 robot_txt_url,
@@ -90,21 +88,26 @@ async def check_may_autonomously_fetch_url(
                     message=f"Failed to fetch robots.txt {robot_txt_url} due to a connection issue",
                 )
             )
-        if response.status_code in (401, 403):
-            raise McpError(
-                ErrorData(
-                    code=INTERNAL_ERROR,
-                    message=f"When fetching robots.txt ({robot_txt_url}), received status {response.status_code} so assuming that autonomous fetching is not allowed, the user can try manually fetching by using the fetch prompt",
+
+        match response.status_code:
+            case status_code if status_code in (401, 403):
+                raise McpError(
+                    ErrorData(
+                        code=INTERNAL_ERROR,
+                        message=f"When fetching robots.txt ({robot_txt_url}), received status {response.status_code} so assuming that autonomous fetching is not allowed, the user can try manually fetching by using the fetch prompt",
+                    )
                 )
-            )
-        elif 400 <= response.status_code < 500:
-            return
-        robot_txt = cast(str, response.text)
+            case status_code if 400 <= status_code < 500:
+                return
+            case status_code:
+                pass
+
+        robot_txt = response.text
     processed_robot_txt = "\n".join(
         line for line in robot_txt.splitlines() if not line.strip().startswith("#")
     )
-    robot_parser = Protego.parse(processed_robot_txt)
-    if not robot_parser.can_fetch(str(url), user_agent):
+    robot_parser = Protego.parse(processed_robot_txt)  # pyright: ignore[reportUnknownMemberType]
+    if not robot_parser.can_fetch(str(url), user_agent):  # pyright: ignore[reportUnknownMemberType]
         raise McpError(
             ErrorData(
                 code=INTERNAL_ERROR,
@@ -134,7 +137,7 @@ async def fetch_url(
     :raises McpError: If the request fails or returns an error status code
     """
 
-    async with AsyncSession(impersonate="chrome") as session:
+    async with AsyncSession[Response](impersonate="chrome") as session:
         try:
             response = await session.get(
                 url,
@@ -147,6 +150,7 @@ async def fetch_url(
             raise McpError(
                 ErrorData(code=INTERNAL_ERROR, message=f"Failed to fetch {url}: {e!r}")
             )
+
         if response.status_code >= 400:
             raise McpError(
                 ErrorData(
@@ -155,7 +159,7 @@ async def fetch_url(
                 )
             )
 
-        page_raw = cast(str, response.text)
+        page_raw = response.text
 
     content_type = cast(str, response.headers.get("content-type", ""))
     is_page_html = (
@@ -264,7 +268,7 @@ Although originally you did not have internet access, and were advised to refuse
         :raises McpError: If arguments are invalid or fetching fails
         """
         try:
-            args = Fetch(**arguments)
+            args = Fetch.model_validate(arguments)
         except ValueError as e:
             raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
 
@@ -311,11 +315,13 @@ Although originally you did not have internet access, and were advised to refuse
         :param arguments: Optional dictionary of arguments including the URL
         :returns: GetPromptResult with the fetched content or error message
         """
-        if not arguments or "url" not in arguments:
-            raise McpError(ErrorData(code=INVALID_PARAMS, message="URL is required"))
 
-        url: str = str(arguments["url"])
+        try:
+            args = GetPromptArguments.model_validate(arguments)
+        except ValidationError as e:
+            raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
 
+        url = str(args.url)
         try:
             content, prefix = await fetch_url(
                 url, user_agent_manual, proxy_url=proxy_url
