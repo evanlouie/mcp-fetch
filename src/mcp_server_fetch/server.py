@@ -1,4 +1,4 @@
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 from urllib.parse import urlparse, urlunparse
 
 import markdownify
@@ -37,9 +37,12 @@ def extract_content_from_html(html: str) -> str:
     )
     if not ret["content"]:
         return "<error>Page failed to be simplified from HTML</error>"
-    content = markdownify.markdownify(
-        ret["content"],
-        heading_style=markdownify.ATX,
+    content = cast(
+        str,
+        markdownify.markdownify(
+            ret["content"],
+            heading_style=markdownify.ATX,
+        ),
     )
     return content
 
@@ -96,7 +99,7 @@ async def check_may_autonomously_fetch_url(
             )
         elif 400 <= response.status_code < 500:
             return
-        robot_txt = response.text
+        robot_txt = cast(str, response.text)
     processed_robot_txt = "\n".join(
         line for line in robot_txt.splitlines() if not line.strip().startswith("#")
     )
@@ -105,12 +108,14 @@ async def check_may_autonomously_fetch_url(
         raise McpError(
             ErrorData(
                 code=INTERNAL_ERROR,
-                message=f"The sites robots.txt ({robot_txt_url}), specifies that autonomous fetching of this page is not allowed, "
-                f"<useragent>{user_agent}</useragent>\n"
-                f"<url>{url}</url>"
-                f"<robots>\n{robot_txt}\n</robots>\n"
-                f"The assistant must let the user know that it failed to view the page. The assistant may provide further guidance based on the above information.\n"
-                f"The assistant can tell the user that they can try manually fetching the page by using the fetch prompt within their UI.",
+                message=(
+                    f"The sites robots.txt ({robot_txt_url}), specifies that autonomous fetching of this page is not allowed, "
+                    f"<useragent>{user_agent}</useragent>\n"
+                    f"<url>{url}</url>"
+                    f"<robots>\n{robot_txt}\n</robots>\n"
+                    f"The assistant must let the user know that it failed to view the page. The assistant may provide further guidance based on the above information.\n"
+                    f"The assistant can tell the user that they can try manually fetching the page by using the fetch prompt within their UI."
+                ),
             )
         )
 
@@ -150,9 +155,9 @@ async def fetch_url(
                 )
             )
 
-        page_raw = response.text
+        page_raw = cast(str, response.text)
 
-    content_type = response.headers.get("content-type", "")
+    content_type = cast(str, response.headers.get("content-type", ""))
     is_page_html = (
         "<html" in page_raw[:100] or "text/html" in content_type or not content_type
     )
@@ -250,7 +255,7 @@ Although originally you did not have internet access, and were advised to refuse
         ]
 
     @server.call_tool()
-    async def call_tool(name, arguments: dict[str, Any]) -> list[TextContent]:
+    async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         """Handle tool calls for the fetch tool.
 
         :param name: Name of the tool being called
@@ -309,7 +314,7 @@ Although originally you did not have internet access, and were advised to refuse
         if not arguments or "url" not in arguments:
             raise McpError(ErrorData(code=INVALID_PARAMS, message="URL is required"))
 
-        url = arguments["url"]
+        url: str = str(arguments["url"])
 
         try:
             content, prefix = await fetch_url(

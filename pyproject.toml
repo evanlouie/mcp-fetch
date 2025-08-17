@@ -34,3 +34,7 @@ build-backend = "hatchling.build"
 
 [tool.uv]
 dev-dependencies = ["basedpyright>=1.31.2", "ruff>=0.7.3"]
+
+[tool.basedpyright]
+reportMissingTypeStubs = false
+reportExplicitAny = false
