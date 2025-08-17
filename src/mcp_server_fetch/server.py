@@ -19,7 +19,6 @@ from mcp.types import (
     TextContent,
     Tool,
 )
-from protego import Protego
 from pydantic import AnyUrl, BaseModel, Field, ValidationError
 
 DEFAULT_USER_AGENT_AUTONOMOUS = "ModelContextProtocol/1.0 (Autonomous; +https://github.com/modelcontextprotocol/servers)"
@@ -60,69 +59,6 @@ def get_robots_txt_url(url: str) -> str:
     return robots_url
 
 
-async def check_may_autonomously_fetch_url(
-    url: str, user_agent: str, proxy_url: str | None = None
-) -> None:
-    """Check if the URL can be fetched by the user agent according to the robots.txt file.
-
-    :param url: URL to check for autonomous fetching permission
-    :param user_agent: User agent string to check against robots.txt
-    :param proxy_url: Optional proxy URL to use for the robots.txt request
-    :raises McpError: If autonomous fetching is not allowed according to robots.txt
-    """
-
-    robot_txt_url = get_robots_txt_url(url)
-
-    async with AsyncSession[Response](impersonate="chrome") as session:
-        try:
-            response = await session.get(
-                robot_txt_url,
-                allow_redirects=True,
-                # headers={"User-Agent": user_agent}, # Don't set custom user agent and let curl_cffi impersonate handle it
-                proxy=proxy_url,
-            )
-        except RequestException:
-            raise McpError(
-                ErrorData(
-                    code=INTERNAL_ERROR,
-                    message=f"Failed to fetch robots.txt {robot_txt_url} due to a connection issue",
-                )
-            )
-
-        match response.status_code:
-            case status_code if status_code in (401, 403):
-                raise McpError(
-                    ErrorData(
-                        code=INTERNAL_ERROR,
-                        message=f"When fetching robots.txt ({robot_txt_url}), received status {response.status_code} so assuming that autonomous fetching is not allowed, the user can try manually fetching by using the fetch prompt",
-                    )
-                )
-            case status_code if 400 <= status_code < 500:
-                return
-            case status_code:
-                pass
-
-        robot_txt = response.text
-    processed_robot_txt = "\n".join(
-        line for line in robot_txt.splitlines() if not line.strip().startswith("#")
-    )
-    robot_parser = Protego.parse(processed_robot_txt)  # pyright: ignore[reportUnknownMemberType]
-    if not robot_parser.can_fetch(str(url), user_agent):  # pyright: ignore[reportUnknownMemberType]
-        raise McpError(
-            ErrorData(
-                code=INTERNAL_ERROR,
-                message=(
-                    f"The sites robots.txt ({robot_txt_url}), specifies that autonomous fetching of this page is not allowed, "
-                    f"<useragent>{user_agent}</useragent>\n"
-                    f"<url>{url}</url>"
-                    f"<robots>\n{robot_txt}\n</robots>\n"
-                    f"The assistant must let the user know that it failed to view the page. The assistant may provide further guidance based on the above information.\n"
-                    f"The assistant can tell the user that they can try manually fetching the page by using the fetch prompt within their UI."
-                ),
-            )
-        )
-
-
 async def fetch_url(
     url: str, user_agent: str, force_raw: bool = False, proxy_url: str | None = None
 ) -> tuple[str, str]:
@@ -142,7 +78,9 @@ async def fetch_url(
             response = await session.get(
                 url,
                 allow_redirects=True,
-                # headers={"User-Agent": user_agent}, # Don't set custom user agent and let curl_cffi impersonate handle it
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                },
                 timeout=30,
                 proxy=proxy_url,
             )
@@ -275,11 +213,6 @@ Although originally you did not have internet access, and were advised to refuse
         url = str(args.url)
         if not url:
             raise McpError(ErrorData(code=INVALID_PARAMS, message="URL is required"))
-
-        if not ignore_robots_txt:
-            await check_may_autonomously_fetch_url(
-                url, user_agent_autonomous, proxy_url
-            )
 
         content, prefix = await fetch_url(
             url, user_agent_autonomous, force_raw=args.raw, proxy_url=proxy_url
