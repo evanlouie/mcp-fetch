@@ -57,7 +57,12 @@ Add to your Claude settings:
         "--from",
         "git+https://github.com/evanlouie/mcp-fetch.git",
         "mcp-server-fetch"
-      ]
+      ],
+      "env": {
+        "PYTHONWARNINGS": "ignore",
+        "npm_config_audit": "false",
+        "npm_config_fund": "false"
+      }
     }
   }
 }
@@ -81,7 +86,12 @@ Optionally, you can add it to a file called `.vscode/mcp.json` in your workspace
           "--from",
           "git+https://github.com/evanlouie/mcp-fetch.git",
           "mcp-server-fetch"
-        ]
+        ],
+        "env": {
+          "PYTHONWARNINGS": "ignore",
+          "npm_config_audit": "false",
+          "npm_config_fund": "false"
+        }
       }
     }
   }
@@ -91,6 +101,33 @@ Optionally, you can add it to a file called `.vscode/mcp.json` in your workspace
 ### Customization - Proxy
 
 The server can be configured to use a proxy by using the `--proxy-url` argument.
+
+## Troubleshooting
+
+### JSON Parsing Errors
+
+If you encounter JSON parsing errors like:
+
+```
+Unexpected token 'o', "found 0 vul"... is not valid JSON
+```
+
+This is caused by security scanners or audit tools outputting non-JSON content to stdout during package installation. The MCP protocol requires pure JSON-RPC messages on stdout, but vulnerability scanners (like npm audit) can contaminate this output.
+
+**Solution**: The environment variables in the configuration examples above suppress these outputs:
+
+- `PYTHONWARNINGS=ignore` - Suppresses Python warning messages
+- `npm_config_audit=false` - Disables npm security audits
+- `npm_config_fund=false` - Disables npm funding messages
+
+**Alternative Solution**: If you continue to experience issues, you can create a wrapper script:
+
+```bash
+#!/bin/bash
+uvx --from git+https://github.com/evanlouie/mcp-fetch.git mcp-server-fetch 2>/dev/null
+```
+
+Then use the wrapper script path as your command instead of `uvx`.
 
 ## Debugging
 
