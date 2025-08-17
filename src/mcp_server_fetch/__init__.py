@@ -5,7 +5,11 @@ from .server import serve
 
 
 def main():
-    """MCP Fetch Server - HTTP fetching functionality for MCP"""
+    """MCP Fetch Server - HTTP fetching functionality for MCP.
+
+    Main entry point for the MCP fetch server that provides HTTP fetching
+    functionality through the Model Context Protocol.
+    """
 
     parser = argparse.ArgumentParser(
         description="give a model the ability to make web requests"

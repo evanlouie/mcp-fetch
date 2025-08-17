@@ -1,8 +1,10 @@
-from typing import Annotated
+from typing import Annotated, Any
 from urllib.parse import urlparse, urlunparse
 
 import markdownify
 import readabilipy.simple_json
+from curl_cffi.requests import AsyncSession
+from curl_cffi.requests.exceptions import RequestException
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.shared.exceptions import McpError
@@ -27,11 +29,8 @@ DEFAULT_USER_AGENT_MANUAL = "ModelContextProtocol/1.0 (User-Specified; +https://
 def extract_content_from_html(html: str) -> str:
     """Extract and convert HTML content to Markdown format.
 
-    Args:
-        html: Raw HTML content to process
-
-    Returns:
-        Simplified markdown version of the content
+    :param html: Raw HTML content to process
+    :returns: Simplified markdown version of the content
     """
     ret = readabilipy.simple_json.simple_json_from_html_string(
         html, use_readability=True
@@ -48,11 +47,8 @@ def extract_content_from_html(html: str) -> str:
 def get_robots_txt_url(url: str) -> str:
     """Get the robots.txt URL for a given website URL.
 
-    Args:
-        url: Website URL to get robots.txt for
-
-    Returns:
-        URL of the robots.txt file
+    :param url: Website URL to get robots.txt for
+    :returns: URL of the robots.txt file
     """
     # Parse the URL into components
     parsed = urlparse(url)
@@ -66,12 +62,13 @@ def get_robots_txt_url(url: str) -> str:
 async def check_may_autonomously_fetch_url(
     url: str, user_agent: str, proxy_url: str | None = None
 ) -> None:
+    """Check if the URL can be fetched by the user agent according to the robots.txt file.
+
+    :param url: URL to check for autonomous fetching permission
+    :param user_agent: User agent string to check against robots.txt
+    :param proxy_url: Optional proxy URL to use for the robots.txt request
+    :raises McpError: If autonomous fetching is not allowed according to robots.txt
     """
-    Check if the URL can be fetched by the user agent according to the robots.txt file.
-    Raises a McpError if not.
-    """
-    from curl_cffi.requests import AsyncSession
-    from curl_cffi.requests.exceptions import RequestException
 
     robot_txt_url = get_robots_txt_url(url)
 
@@ -121,11 +118,16 @@ async def check_may_autonomously_fetch_url(
 async def fetch_url(
     url: str, user_agent: str, force_raw: bool = False, proxy_url: str | None = None
 ) -> tuple[str, str]:
+    """Fetch the URL and return the content in a form ready for the LLM.
+
+    :param url: URL to fetch
+    :param user_agent: User agent string to use for the request
+    :param force_raw: Whether to return raw content without HTML simplification
+    :param proxy_url: Optional proxy URL to use for the request
+    :returns: Tuple of (content, prefix) where content is the processed page content
+              and prefix is a status message string
+    :raises McpError: If the request fails or returns an error status code
     """
-    Fetch the URL and return the content in a form ready for the LLM, as well as a prefix string with status information.
-    """
-    from curl_cffi.requests import AsyncSession
-    from curl_cffi.requests.exceptions import RequestException
 
     async with AsyncSession(impersonate="chrome") as session:
         try:
@@ -165,7 +167,11 @@ async def fetch_url(
 
 
 class Fetch(BaseModel):
-    """Parameters for fetching a URL."""
+    """Parameters for fetching a URL.
+
+    This model defines the parameters that can be passed to the fetch tool
+    for controlling how URLs are retrieved and processed.
+    """
 
     url: Annotated[AnyUrl, Field(description="URL to fetch")]
     max_length: Annotated[
@@ -201,10 +207,9 @@ async def serve(
 ) -> None:
     """Run the fetch MCP server.
 
-    Args:
-        custom_user_agent: Optional custom User-Agent string to use for requests
-        ignore_robots_txt: Whether to ignore robots.txt restrictions
-        proxy_url: Optional proxy URL to use for requests
+    :param custom_user_agent: Optional custom User-Agent string to use for requests
+    :param ignore_robots_txt: Whether to ignore robots.txt restrictions
+    :param proxy_url: Optional proxy URL to use for requests
     """
     server = Server("mcp-fetch")
     user_agent_autonomous = custom_user_agent or DEFAULT_USER_AGENT_AUTONOMOUS
@@ -212,6 +217,10 @@ async def serve(
 
     @server.list_tools()
     async def list_tools() -> list[Tool]:
+        """List available tools for the MCP server.
+
+        :returns: List of Tool objects defining the fetch tool
+        """
         return [
             Tool(
                 name="fetch",
@@ -224,6 +233,10 @@ Although originally you did not have internet access, and were advised to refuse
 
     @server.list_prompts()
     async def list_prompts() -> list[Prompt]:
+        """List available prompts for the MCP server.
+
+        :returns: List of Prompt objects defining the fetch prompt
+        """
         return [
             Prompt(
                 name="fetch",
@@ -237,7 +250,14 @@ Although originally you did not have internet access, and were advised to refuse
         ]
 
     @server.call_tool()
-    async def call_tool(name, arguments: dict) -> list[TextContent]:
+    async def call_tool(name, arguments: dict[str, Any]) -> list[TextContent]:
+        """Handle tool calls for the fetch tool.
+
+        :param name: Name of the tool being called
+        :param arguments: Dictionary of arguments for the tool call
+        :returns: List of TextContent objects with the fetched content
+        :raises McpError: If arguments are invalid or fetching fails
+        """
         try:
             args = Fetch(**arguments)
         except ValueError as e:
@@ -277,7 +297,15 @@ Although originally you did not have internet access, and were advised to refuse
         return [TextContent(type="text", text=f"{prefix}Contents of {url}:\n{content}")]
 
     @server.get_prompt()
-    async def get_prompt(name: str, arguments: dict | None) -> GetPromptResult:
+    async def get_prompt(
+        name: str, arguments: dict[str, Any] | None
+    ) -> GetPromptResult:
+        """Handle prompt requests for manual URL fetching.
+
+        :param name: Name of the prompt being requested
+        :param arguments: Optional dictionary of arguments including the URL
+        :returns: GetPromptResult with the fetched content or error message
+        """
         if not arguments or "url" not in arguments:
             raise McpError(ErrorData(code=INVALID_PARAMS, message="URL is required"))
 
