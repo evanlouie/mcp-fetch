@@ -9,7 +9,7 @@ This is a fork of the [original MCP fetch server](https://github.com/modelcontex
 - **Browser Impersonation**: Uses curl_cffi to mimic real browser requests, helping bypass basic bot detection
 - **Content Extraction**: Converts HTML to markdown for easier LLM consumption
 - **Chunked Reading**: Support for reading large webpages in chunks using `start_index`
-- **Security Controls**: Built-in robots.txt compliance and customizable user agents
+- **Browser Headers**: Uses realistic Chrome browser headers for better compatibility
 
 > [!CAUTION]
 > This server can access local/internal IP addresses and may represent a security risk. Exercise caution when using this MCP server to ensure this does not expose any sensitive data.
@@ -19,10 +19,10 @@ The fetch tool will truncate the response, but by using the `start_index` argume
 ### Available Tools
 
 - `fetch` - Fetches a URL from the internet and extracts its contents as markdown.
-    - `url` (string, required): URL to fetch
-    - `max_length` (integer, optional): Maximum number of characters to return (default: 5000)
-    - `start_index` (integer, optional): Start content from this character index (default: 0)
-    - `raw` (boolean, optional): Get raw content without markdown conversion (default: false)
+  - `url` (string, required): URL to fetch
+  - `max_length` (integer, optional): Maximum number of characters to return (default: 5000)
+  - `start_index` (integer, optional): Start content from this character index (default: 0)
+  - `raw` (boolean, optional): Get raw content without markdown conversion (default: false)
 
 ### Prompts
 
@@ -53,7 +53,11 @@ Add to your Claude settings:
   "mcpServers": {
     "fetch": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/evanlouie/mcp-fetch.git", "mcp-server-fetch"]
+      "args": [
+        "--from",
+        "git+https://github.com/evanlouie/mcp-fetch.git",
+        "mcp-server-fetch"
+      ]
     }
   }
 }
@@ -73,7 +77,11 @@ Optionally, you can add it to a file called `.vscode/mcp.json` in your workspace
     "servers": {
       "fetch": {
         "command": "uvx",
-        "args": ["--from", "git+https://github.com/evanlouie/mcp-fetch.git", "mcp-server-fetch"]
+        "args": [
+          "--from",
+          "git+https://github.com/evanlouie/mcp-fetch.git",
+          "mcp-server-fetch"
+        ]
       }
     }
   }
@@ -81,25 +89,7 @@ Optionally, you can add it to a file called `.vscode/mcp.json` in your workspace
 ```
 
 
-### Customization - robots.txt
 
-By default, the server will obey a websites robots.txt file if the request came from the model (via a tool), but not if
-the request was user initiated (via a prompt). This can be disabled by adding the argument `--ignore-robots-txt` to the
-`args` list in the configuration.
-
-### Customization - User-agent
-
-By default, depending on if the request came from the model (via a tool), or was user initiated (via a prompt), the
-server will use either the user-agent
-```
-ModelContextProtocol/1.0 (Autonomous; +https://github.com/modelcontextprotocol/servers)
-```
-or
-```
-ModelContextProtocol/1.0 (User-Specified; +https://github.com/modelcontextprotocol/servers)
-```
-
-This can be customized by adding the argument `--user-agent=YourUserAgent` to the `args` list in the configuration.
 
 ### Customization - Proxy
 

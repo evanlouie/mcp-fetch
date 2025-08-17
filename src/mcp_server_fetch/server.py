@@ -21,9 +21,6 @@ from mcp.types import (
 )
 from pydantic import AnyUrl, BaseModel, Field, ValidationError
 
-DEFAULT_USER_AGENT_AUTONOMOUS = "ModelContextProtocol/1.0 (Autonomous; +https://github.com/modelcontextprotocol/servers)"
-DEFAULT_USER_AGENT_MANUAL = "ModelContextProtocol/1.0 (User-Specified; +https://github.com/modelcontextprotocol/servers)"
-
 
 class GetPromptArguments(BaseModel):
     url: AnyUrl
@@ -60,12 +57,11 @@ def get_robots_txt_url(url: str) -> str:
 
 
 async def fetch_url(
-    url: str, user_agent: str, force_raw: bool = False, proxy_url: str | None = None
+    url: str, force_raw: bool = False, proxy_url: str | None = None
 ) -> tuple[str, str]:
     """Fetch the URL and return the content in a form ready for the LLM.
 
     :param url: URL to fetch
-    :param user_agent: User agent string to use for the request
     :param force_raw: Whether to return raw content without HTML simplification
     :param proxy_url: Optional proxy URL to use for the request
     :returns: Tuple of (content, prefix) where content is the processed page content
@@ -148,19 +144,13 @@ class Fetch(BaseModel):
 
 
 async def serve(
-    custom_user_agent: str | None = None,
-    ignore_robots_txt: bool = False,
     proxy_url: str | None = None,
 ) -> None:
     """Run the fetch MCP server.
 
-    :param custom_user_agent: Optional custom User-Agent string to use for requests
-    :param ignore_robots_txt: Whether to ignore robots.txt restrictions
     :param proxy_url: Optional proxy URL to use for requests
     """
     server = Server("mcp-fetch")
-    user_agent_autonomous = custom_user_agent or DEFAULT_USER_AGENT_AUTONOMOUS
-    user_agent_manual = custom_user_agent or DEFAULT_USER_AGENT_MANUAL
 
     @server.list_tools()
     async def list_tools() -> list[Tool]:
@@ -214,9 +204,7 @@ Although originally you did not have internet access, and were advised to refuse
         if not url:
             raise McpError(ErrorData(code=INVALID_PARAMS, message="URL is required"))
 
-        content, prefix = await fetch_url(
-            url, user_agent_autonomous, force_raw=args.raw, proxy_url=proxy_url
-        )
+        content, prefix = await fetch_url(url, force_raw=args.raw, proxy_url=proxy_url)
         original_length = len(content)
         if args.start_index >= original_length:
             content = "<error>No more content available.</error>"
@@ -256,9 +244,7 @@ Although originally you did not have internet access, and were advised to refuse
 
         url = str(args.url)
         try:
-            content, prefix = await fetch_url(
-                url, user_agent_manual, proxy_url=proxy_url
-            )
+            content, prefix = await fetch_url(url, proxy_url=proxy_url)
             # TODO: after SDK bug is addressed, don't catch the exception
         except McpError as e:
             return GetPromptResult(
