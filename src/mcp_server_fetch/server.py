@@ -95,9 +95,13 @@ async def fetch_url(
 
         page_raw = response.text
 
-    content_type = cast(str, response.headers.get("content-type", ""))
+    content_type = cast(str, (response.headers.get("content-type") or "")).lower()
+    head_lower = page_raw[:2000].lower()
     is_page_html = (
-        "<html" in page_raw[:100] or "text/html" in content_type or not content_type
+        "text/html" in content_type
+        or "application/xhtml+xml" in content_type
+        or "<!doctype html" in head_lower
+        or "<html" in head_lower
     )
 
     if is_page_html and not force_raw:
