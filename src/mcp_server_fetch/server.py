@@ -19,11 +19,11 @@ from mcp.types import (
     TextContent,
     Tool,
 )
-from pydantic import AnyUrl, BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, HttpUrl, ValidationError
 
 
 class GetPromptArguments(BaseModel):
-    url: AnyUrl
+    url: HttpUrl
 
 
 def extract_content_from_html(html: str) -> str:
@@ -116,7 +116,7 @@ class Fetch(BaseModel):
     for controlling how URLs are retrieved and processed.
     """
 
-    url: Annotated[AnyUrl, Field(description="URL to fetch")]
+    url: Annotated[HttpUrl, Field(description="URL to fetch")]
     max_length: Annotated[
         int,
         Field(
@@ -197,7 +197,7 @@ This tool uses Chrome browser impersonation to access websites that might otherw
         """
         try:
             args = Fetch.model_validate(arguments)
-        except ValueError as e:
+        except ValidationError as e:
             raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
 
         url = str(args.url)
