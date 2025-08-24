@@ -37,8 +37,8 @@ def extract_content_from_html(html: str) -> str:
     )
     if not ret["content"]:
         return "<error>Page failed to be simplified from HTML</error>"
-    content = markdownify.markdownify(ret["content"], heading_style=markdownify.ATX)  # pyright: ignore[reportUnknownMemberType]
-    return cast(str, content)
+    content = markdownify.markdownify(ret["content"], heading_style=markdownify.ATX)
+    return content
 
 
 def get_robots_txt_url(url: str) -> str:
