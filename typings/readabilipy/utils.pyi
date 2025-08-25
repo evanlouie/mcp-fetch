@@ -7,8 +7,8 @@ from contextlib import contextmanager
 """Utility functions
 
 """
+
 @contextmanager
-def chdir(path): # -> Generator[None, Any, None]:
+def chdir(path):  # -> Generator[None, Any, None]:
     """Change directory in context and return to original on exit"""
     ...
-

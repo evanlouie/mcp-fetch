@@ -21,6 +21,8 @@ from mcp.types import (
 )
 from pydantic import BaseModel, Field, HttpUrl, ValidationError
 
+from .ssrf_validator import SSRFValidator
+
 
 class GetPromptArguments(BaseModel):
     url: HttpUrl
@@ -69,11 +71,15 @@ async def fetch_url(
     :raises McpError: If the request fails or returns an error status code
     """
 
+    # Create SSRF validator
+    ssrf_validator = SSRFValidator()
+
     async with AsyncSession[Response](impersonate="chrome") as session:
         try:
-            response = await session.get(
+            # Use SSRF-safe redirect following instead of allow_redirects=True
+            response = await ssrf_validator.follow_redirects_safely(
+                session,
                 url,
-                allow_redirects=True,
                 headers={
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                 },
@@ -89,7 +95,7 @@ async def fetch_url(
             raise McpError(
                 ErrorData(
                     code=INTERNAL_ERROR,
-                    message=f"Failed to fetch {url} - status code {response.status_code}",
+                    message=f"Failed to fetch {url}: HTTP {response.status_code}",
                 )
             )
 
@@ -228,7 +234,7 @@ This tool uses Chrome browser impersonation to access websites that might otherw
                 if actual_content_length == args.max_length and remaining_content > 0:
                     next_start = args.start_index + actual_content_length
                     content += f"\n\n<error>Content truncated. Call the fetch tool with a start_index of {next_start} to get more content.</error>"
-        return [TextContent(type="text", text=f"{prefix}Contents of {url}:\n{content}")]
+        return [TextContent(type="text", text=f"{prefix}Contents:\n{content}")]
 
     @server.get_prompt()
     async def get_prompt(
@@ -252,7 +258,7 @@ This tool uses Chrome browser impersonation to access websites that might otherw
             # TODO: after SDK bug is addressed, don't catch the exception
         except McpError as e:
             return GetPromptResult(
-                description=f"Failed to fetch {url}",
+                description="Failed to fetch URL",
                 messages=[
                     PromptMessage(
                         role="user",
@@ -261,7 +267,7 @@ This tool uses Chrome browser impersonation to access websites that might otherw
                 ],
             )
         return GetPromptResult(
-            description=f"Contents of {url}",
+            description="Contents of requested URL",
             messages=[
                 PromptMessage(
                     role="user", content=TextContent(type="text", text=prefix + content)
