@@ -1,3 +1,4 @@
+import contextlib
 from typing import Annotated, Any, cast
 from urllib.parse import urlparse, urlunparse
 
@@ -21,6 +22,7 @@ from mcp.types import (
 )
 from pydantic import BaseModel, Field, HttpUrl, ValidationError
 
+from .session_manager import SessionConfig, SessionManager, SessionManagerError
 from .ssrf_validator import SSRFValidator
 
 
@@ -58,10 +60,112 @@ def get_robots_txt_url(url: str) -> str:
     return robots_url
 
 
-async def fetch_url(
+async def fetch_url_with_fallback(
+    url: str,
+    session_manager: SessionManager,
+    force_raw: bool = False,
+    proxy_url: str | None = None,
+) -> tuple[str, str]:
+    """Fetch URL with session manager, falling back to per-request session on failure.
+
+    :param url: URL to fetch
+    :param session_manager: SessionManager instance for connection pooling
+    :param force_raw: Whether to return raw content without HTML simplification
+    :param proxy_url: Optional proxy URL to use for the request
+    :returns: Tuple of (content, prefix) where content is the processed page content
+              and prefix is a status message string
+    :raises McpError: If the request fails or returns an error status code
+    """
+    try:
+        return await fetch_url_pooled(url, session_manager, force_raw, proxy_url)
+    except SessionManagerError:
+        # Fallback to per-request session
+        return await fetch_url_legacy(url, force_raw, proxy_url)
+
+
+async def fetch_url_pooled(
+    url: str,
+    session_manager: SessionManager,
+    force_raw: bool = False,
+    proxy_url: str | None = None,
+) -> tuple[str, str]:
+    """Fetch URL using SessionManager for connection pooling.
+
+    :param url: URL to fetch
+    :param session_manager: SessionManager instance for connection pooling
+    :param force_raw: Whether to return raw content without HTML simplification
+    :param proxy_url: Optional proxy URL to use for the request
+    :returns: Tuple of (content, prefix) where content is the processed page content
+              and prefix is a status message string
+    :raises McpError: If the request fails or returns an error status code
+    """
+    # Create SSRF validator
+    ssrf_validator = SSRFValidator()
+
+    # Create session configuration
+    config = SessionConfig(
+        impersonate="chrome",
+        proxy_url=proxy_url,
+    )
+
+    try:
+        # Get session from manager
+        session = await session_manager.get_session(config)
+
+        try:
+            # Use SSRF-safe redirect following instead of allow_redirects=True
+            response = await ssrf_validator.follow_redirects_safely(
+                session,
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                },
+                timeout=30,
+                proxy=proxy_url,
+            )
+        except RequestException as e:
+            # Handle request error and potentially recreate session
+            should_recreate = await session_manager.handle_request_error(config, e)
+            if should_recreate:
+                # Retry once with new session
+                session = await session_manager.get_session(config)
+                response = await ssrf_validator.follow_redirects_safely(
+                    session,
+                    url,
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                    },
+                    timeout=30,
+                    proxy=proxy_url,
+                )
+            else:
+                raise McpError(
+                    ErrorData(
+                        code=INTERNAL_ERROR, message=f"Failed to fetch {url}: {e!r}"
+                    )
+                )
+
+        if response.status_code >= 400:
+            raise McpError(
+                ErrorData(
+                    code=INTERNAL_ERROR,
+                    message=f"Failed to fetch {url}: HTTP {response.status_code}",
+                )
+            )
+
+        page_raw = response.text
+        return process_content(page_raw, response, force_raw)
+
+    except SessionManagerError as e:
+        raise SessionManagerError(f"Session manager failed: {e}") from e
+
+
+async def fetch_url_legacy(
     url: str, force_raw: bool = False, proxy_url: str | None = None
 ) -> tuple[str, str]:
-    """Fetch the URL and return the content in a form ready for the LLM.
+    """Legacy fetch URL implementation using per-request sessions.
+
+    This is used as fallback when SessionManager fails.
 
     :param url: URL to fetch
     :param force_raw: Whether to return raw content without HTML simplification
@@ -70,7 +174,6 @@ async def fetch_url(
               and prefix is a status message string
     :raises McpError: If the request fails or returns an error status code
     """
-
     # Create SSRF validator
     ssrf_validator = SSRFValidator()
 
@@ -100,7 +203,26 @@ async def fetch_url(
             )
 
         page_raw = response.text
+        return process_content(page_raw, response, force_raw)
 
+
+# Backward compatibility wrapper - will be used by serve() function
+async def fetch_url(
+    url: str, force_raw: bool = False, proxy_url: str | None = None
+) -> tuple[str, str]:
+    """Backward compatibility wrapper for fetch_url.
+
+    This function is used by the serve() function handlers and will be updated
+    to use SessionManager via dependency injection.
+    """
+    # This will be replaced by the session manager when serve() is updated
+    return await fetch_url_legacy(url, force_raw, proxy_url)
+
+
+# Shared content processing logic
+def process_content(
+    page_raw: str, response: Response, force_raw: bool
+) -> tuple[str, str]:
     content_type = cast(str, (response.headers.get("content-type") or "")).lower()
     head_lower = page_raw[:2000].lower()
     is_page_html = (
@@ -162,6 +284,18 @@ async def serve(
     """
     server = Server("mcp-fetch")
 
+    # Create SessionManager for connection pooling
+    session_manager = SessionManager()
+
+    async def fetch_with_session_manager(
+        url: str, force_raw: bool = False, proxy_url_override: str | None = None
+    ) -> tuple[str, str]:
+        """Fetch URL using SessionManager with fallback."""
+        effective_proxy_url = proxy_url_override or proxy_url
+        return await fetch_url_with_fallback(
+            url, session_manager, force_raw, effective_proxy_url
+        )
+
     @server.list_tools()
     async def list_tools() -> list[Tool]:
         """List available tools for the MCP server.
@@ -214,7 +348,9 @@ This tool uses Chrome browser impersonation to access websites that might otherw
         if not url:
             raise McpError(ErrorData(code=INVALID_PARAMS, message="URL is required"))
 
-        content, prefix = await fetch_url(url, force_raw=args.raw, proxy_url=proxy_url)
+        content, prefix = await fetch_with_session_manager(
+            url, force_raw=args.raw, proxy_url_override=proxy_url
+        )
         original_length = len(content)
         if args.start_index >= original_length:
             content = "<error>No more content available.</error>"
@@ -254,7 +390,9 @@ This tool uses Chrome browser impersonation to access websites that might otherw
 
         url = str(args.url)
         try:
-            content, prefix = await fetch_url(url, proxy_url=proxy_url)
+            content, prefix = await fetch_with_session_manager(
+                url, proxy_url_override=proxy_url
+            )
             # TODO: after SDK bug is addressed, don't catch the exception
         except McpError as e:
             return GetPromptResult(
@@ -276,5 +414,12 @@ This tool uses Chrome browser impersonation to access websites that might otherw
         )
 
     options = server.create_initialization_options()
-    async with stdio_server() as (read_stream, write_stream):
+
+    # Use AsyncExitStack for proper cleanup of SessionManager
+    async with contextlib.AsyncExitStack() as stack:
+        # Ensure SessionManager cleanup on exit
+        stack.push_async_callback(session_manager.close_all)
+
+        # Start the server
+        read_stream, write_stream = await stack.enter_async_context(stdio_server())
         await server.run(read_stream, write_stream, options, raise_exceptions=True)

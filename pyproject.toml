@@ -37,6 +37,14 @@ dev-dependencies = ["basedpyright>=1.31.2", "ruff>=0.7.3", "pytest>=8.0.0", "pyt
 reportMissingTypeStubs = false
 reportExplicitAny = false
 
+# Ignore stub files completely to avoid noise from third-party type definitions
+ignore = ["typings/**/*.pyi"]
+
+# Allow some reasonable patterns for this codebase
+reportUnusedFunction = false  # MCP server handlers are "unused" by design
+reportUnusedParameter = false  # MCP server handlers often have unused params like "name"
+reportPrivateUsage = false  # Tests need to access private members for validation
+
 [tool.pytest.ini_options]
 testpaths = ["src"]
 python_files = ["*_test.py", "test_*.py"]
