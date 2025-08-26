@@ -1,6 +1,7 @@
 import asyncio
 
 import pytest
+from curl_cffi.requests.exceptions import RequestException
 
 from .session_manager import SessionConfig, SessionManager
 
@@ -92,8 +93,6 @@ class TestSessionManager:
             assert session1 is not None
 
             # Simulate connection error
-            from curl_cffi.requests.exceptions import RequestException
-
             error = RequestException("Connection failed")
 
             should_recreate = await session_manager.handle_request_error(config, error)
