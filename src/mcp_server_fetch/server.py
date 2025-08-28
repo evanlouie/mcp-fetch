@@ -1,8 +1,8 @@
 from typing import Annotated, Any, cast
 from urllib.parse import urlparse, urlunparse
 
-import markdownify
-import readabilipy.simple_json
+from markdownify import ATX, markdownify as md_to_markdown  # pyright: ignore[reportUnknownVariableType]
+from readabilipy.simple_json import simple_json_from_html_string  # pyright: ignore[reportUnknownVariableType]
 from curl_cffi.requests import AsyncSession, Response
 from curl_cffi.requests.exceptions import RequestException
 from mcp.server import Server
@@ -32,13 +32,19 @@ def extract_content_from_html(html: str) -> str:
     :param html: Raw HTML content to process
     :returns: Simplified markdown version of the content
     """
-    ret = readabilipy.simple_json.simple_json_from_html_string(
-        html, use_readability=True
-    )
-    if not ret["content"]:
+    try:
+        ret = cast(
+            dict[str, Any],
+            simple_json_from_html_string(html, use_readability=True),
+        )
+    except Exception:
         return "<error>Page failed to be simplified from HTML</error>"
-    content = markdownify.markdownify(ret["content"], heading_style=markdownify.ATX)  # pyright: ignore[reportUnknownMemberType]
-    return cast(str, content)
+
+    content_html = cast(str | None, ret.get("content"))
+    if not content_html:
+        return "<error>Page failed to be simplified from HTML</error>"
+
+    return cast(str, md_to_markdown(content_html, heading_style=ATX))
 
 
 def get_robots_txt_url(url: str) -> str:
@@ -157,7 +163,7 @@ async def serve(
     server = Server("mcp-fetch")
 
     @server.list_tools()
-    async def list_tools() -> list[Tool]:
+    async def list_tools() -> list[Tool]:  # pyright: ignore[reportUnusedFunction]
         """List available tools for the MCP server.
 
         :returns: List of Tool objects defining the fetch tool
@@ -173,7 +179,7 @@ This tool uses Chrome browser impersonation to access websites that might otherw
         ]
 
     @server.list_prompts()
-    async def list_prompts() -> list[Prompt]:
+    async def list_prompts() -> list[Prompt]:  # pyright: ignore[reportUnusedFunction]
         """List available prompts for the MCP server.
 
         :returns: List of Prompt objects defining the fetch prompt
@@ -191,10 +197,12 @@ This tool uses Chrome browser impersonation to access websites that might otherw
         ]
 
     @server.call_tool()
-    async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
+    async def call_tool(  # pyright: ignore[reportUnusedFunction]
+        _name: str, arguments: dict[str, Any]
+    ) -> list[TextContent]:
         """Handle tool calls for the fetch tool.
 
-        :param name: Name of the tool being called
+        :param _name: Name of the tool being called
         :param arguments: Dictionary of arguments for the tool call
         :returns: List of TextContent objects with the fetched content
         :raises McpError: If arguments are invalid or fetching fails
@@ -231,12 +239,12 @@ This tool uses Chrome browser impersonation to access websites that might otherw
         return [TextContent(type="text", text=f"{prefix}Contents of {url}:\n{content}")]
 
     @server.get_prompt()
-    async def get_prompt(
-        name: str, arguments: dict[str, Any] | None
+    async def get_prompt(  # pyright: ignore[reportUnusedFunction]
+        _name: str, arguments: dict[str, Any] | None
     ) -> GetPromptResult:
         """Handle prompt requests for manual URL fetching.
 
-        :param name: Name of the prompt being requested
+        :param _name: Name of the prompt being requested
         :param arguments: Optional dictionary of arguments including the URL
         :returns: GetPromptResult with the fetched content or error message
         """

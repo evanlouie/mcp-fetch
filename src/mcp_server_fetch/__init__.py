@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+from typing import cast
 
 from .server import serve
 
@@ -18,8 +19,8 @@ def main():
         "--proxy-url", type=str, help="Proxy URL to use for requests"
     )
 
-    args = parser.parse_args()
-    proxy_url: str | None = args.proxy_url
+    args: argparse.Namespace = parser.parse_args()
+    proxy_url = cast(str | None, args.proxy_url)
     asyncio.run(serve(proxy_url))
 
 
