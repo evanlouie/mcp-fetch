@@ -12,7 +12,3 @@
 ## Commit Guidelines
 
 - Write every commit message using the Conventional Commit format (e.g., `fix: guard oversized responses`).
-
-## Workflow Restrictions
-
-- Never run `git` *get* workflows (e.g., fetch/pull) automatically; only execute them when the user explicitly requests it.
