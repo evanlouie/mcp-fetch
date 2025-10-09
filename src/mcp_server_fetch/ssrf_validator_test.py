@@ -13,52 +13,59 @@ from .ssrf_validator import SSRFValidator
 class TestSSRFValidator:
     """Test suite for SSRFValidator class."""
 
-    validator: SSRFValidator
+    validator: SSRFValidator | None = None
 
     def setup_method(self):
         """Setup validator instance for each test."""
         self.validator = SSRFValidator()
 
+    @property
+    def _validator(self) -> SSRFValidator:
+        validator = self.validator
+        if validator is None:
+            raise AssertionError("Validator has not been initialized")
+        return validator
+
     @pytest.mark.asyncio
     async def test_validate_url_valid_http(self):
         """Test validation of valid HTTP URLs."""
         with patch.object(
-            self.validator, "_resolve_and_validate_hostname", new_callable=AsyncMock
+            self._validator, "_resolve_and_validate_hostname", new_callable=AsyncMock
         ):
-            await self.validator.validate_url("http://example.com")
-            await self.validator.validate_url("https://google.com")
+            await self._validator.validate_url("http://example.com")
+            await self._validator.validate_url("https://google.com")
 
     @pytest.mark.asyncio
     async def test_validate_url_invalid_format(self):
         """Test validation rejects invalid URL formats."""
         with pytest.raises(McpError, match="Invalid URL format"):
-            await self.validator.validate_url("")
+            await self._validator.validate_url("")
 
         with pytest.raises(McpError, match="Invalid URL format"):
-            await self.validator.validate_url("not-a-url")
+            await self._validator.validate_url("not-a-url")
 
         with pytest.raises(McpError, match="Invalid URL format"):
-            await self.validator.validate_url("://missing-scheme")
+            await self._validator.validate_url("://missing-scheme")
 
     @pytest.mark.asyncio
     async def test_validate_url_invalid_scheme(self):
         """Test validation rejects non-HTTP schemes."""
         with pytest.raises(McpError, match="Only HTTP and HTTPS URLs are allowed"):
-            await self.validator.validate_url("ftp://example.com")
+            await self._validator.validate_url("ftp://example.com")
 
         # file:/// URLs don't have netloc so they're caught as "Invalid URL format"
         with pytest.raises(McpError, match="Invalid URL format"):
-            await self.validator.validate_url("file:///etc/passwd")
+            await self._validator.validate_url("file:///etc/passwd")
 
         with pytest.raises(McpError, match="Only HTTP and HTTPS URLs are allowed"):
-            await self.validator.validate_url("gopher://example.com")
+            await self._validator.validate_url("gopher://example.com")
 
     @pytest.mark.asyncio
     async def test_validate_url_missing_hostname(self):
         """Test validation rejects URLs without hostname."""
         # URLs without netloc are caught as "Invalid URL format"
         with pytest.raises(McpError, match="Invalid URL format"):
-            await self.validator.validate_url("http://")
+            await self._validator.validate_url("http://")
 
     @pytest.mark.asyncio
     async def test_validate_url_localhost_ipv4(self):
@@ -66,17 +73,17 @@ class TestSSRFValidator:
         with pytest.raises(
             McpError, match="Access to private or reserved IP ranges is not allowed"
         ):
-            await self.validator.validate_url("http://127.0.0.1")
+            await self._validator.validate_url("http://127.0.0.1")
 
         with pytest.raises(
             McpError, match="Access to private or reserved IP ranges is not allowed"
         ):
-            await self.validator.validate_url("http://127.0.0.1:8080")
+            await self._validator.validate_url("http://127.0.0.1:8080")
 
         with pytest.raises(
             McpError, match="Access to private or reserved IP ranges is not allowed"
         ):
-            await self.validator.validate_url("https://127.1.1.1")
+            await self._validator.validate_url("https://127.1.1.1")
 
     @pytest.mark.asyncio
     async def test_validate_url_private_ipv4(self):
@@ -93,7 +100,7 @@ class TestSSRFValidator:
             with pytest.raises(
                 McpError, match="Access to private or reserved IP ranges is not allowed"
             ):
-                await self.validator.validate_url(f"http://{ip}")
+                await self._validator.validate_url(f"http://{ip}")
 
     @pytest.mark.asyncio
     async def test_validate_url_link_local_ipv4(self):
@@ -101,12 +108,12 @@ class TestSSRFValidator:
         with pytest.raises(
             McpError, match="Access to private or reserved IP ranges is not allowed"
         ):
-            await self.validator.validate_url("http://169.254.169.254")
+            await self._validator.validate_url("http://169.254.169.254")
 
         with pytest.raises(
             McpError, match="Access to private or reserved IP ranges is not allowed"
         ):
-            await self.validator.validate_url("http://169.254.169.254/metadata")
+            await self._validator.validate_url("http://169.254.169.254/metadata")
 
     @pytest.mark.asyncio
     async def test_validate_url_reserved_ipv4(self):
@@ -121,7 +128,7 @@ class TestSSRFValidator:
             with pytest.raises(
                 McpError, match="Access to private or reserved IP ranges is not allowed"
             ):
-                await self.validator.validate_url(f"http://{ip}")
+                await self._validator.validate_url(f"http://{ip}")
 
     @pytest.mark.asyncio
     async def test_validate_url_localhost_ipv6(self):
@@ -129,12 +136,12 @@ class TestSSRFValidator:
         with pytest.raises(
             McpError, match="Access to private or reserved IP ranges is not allowed"
         ):
-            await self.validator.validate_url("http://[::1]")
+            await self._validator.validate_url("http://[::1]")
 
         with pytest.raises(
             McpError, match="Access to private or reserved IP ranges is not allowed"
         ):
-            await self.validator.validate_url("http://[::1]:8080")
+            await self._validator.validate_url("http://[::1]:8080")
 
     @pytest.mark.asyncio
     async def test_validate_url_private_ipv6(self):
@@ -150,7 +157,7 @@ class TestSSRFValidator:
             with pytest.raises(
                 McpError, match="Access to private or reserved IP ranges is not allowed"
             ):
-                await self.validator.validate_url(f"http://[{ip}]")
+                await self._validator.validate_url(f"http://[{ip}]")
 
     @pytest.mark.asyncio
     async def test_validate_url_public_ipv4_allowed(self):
@@ -163,7 +170,7 @@ class TestSSRFValidator:
 
         for ip in public_ips:
             # Should not raise an exception
-            await self.validator.validate_url(f"http://{ip}")
+            await self._validator.validate_url(f"http://{ip}")
 
     @pytest.mark.asyncio
     async def test_validate_url_public_ipv6_allowed(self):
@@ -175,7 +182,7 @@ class TestSSRFValidator:
 
         for ip in public_ipv6s:
             # Should not raise an exception
-            await self.validator.validate_url(f"http://[{ip}]")
+            await self._validator.validate_url(f"http://[{ip}]")
 
     @pytest.mark.asyncio
     async def test_resolve_and_validate_hostname_blocked_resolution(self):
@@ -195,7 +202,7 @@ class TestSSRFValidator:
                     McpError,
                     match="Access to private or reserved IP ranges is not allowed",
                 ):
-                    await self.validator._resolve_and_validate_hostname("evil.com")
+                    await self._validator._resolve_and_validate_hostname("evil.com")
 
     @pytest.mark.asyncio
     async def test_resolve_and_validate_hostname_dns_timeout(self):
@@ -204,7 +211,7 @@ class TestSSRFValidator:
             mock_wait_for.side_effect = asyncio.TimeoutError()
 
             with pytest.raises(McpError, match="Failed to resolve hostname"):
-                await self.validator._resolve_and_validate_hostname("timeout.com")
+                await self._validator._resolve_and_validate_hostname("timeout.com")
 
     @pytest.mark.asyncio
     async def test_resolve_and_validate_hostname_dns_error(self):
@@ -213,7 +220,7 @@ class TestSSRFValidator:
             mock_wait_for.side_effect = socket.gaierror("DNS resolution failed")
 
             with pytest.raises(McpError, match="Failed to resolve hostname"):
-                await self.validator._resolve_and_validate_hostname("nonexistent.com")
+                await self._validator._resolve_and_validate_hostname("nonexistent.com")
 
     @pytest.mark.asyncio
     async def test_resolve_and_validate_hostname_no_results(self):
@@ -222,7 +229,7 @@ class TestSSRFValidator:
             mock_wait_for.return_value = []
 
             with pytest.raises(McpError, match="No IP addresses resolved for hostname"):
-                await self.validator._resolve_and_validate_hostname("empty.com")
+                await self._validator._resolve_and_validate_hostname("empty.com")
 
     @pytest.mark.asyncio
     async def test_resolve_and_validate_hostname_valid(self):
@@ -234,7 +241,7 @@ class TestSSRFValidator:
             mock_wait_for.return_value = mock_addrinfo
 
             # Should not raise an exception
-            await self.validator._resolve_and_validate_hostname("google.com")
+            await self._validator._resolve_and_validate_hostname("google.com")
 
     @pytest.mark.asyncio
     async def test_follow_redirects_safely_no_redirects(self):
@@ -245,9 +252,9 @@ class TestSSRFValidator:
         mock_session.get.return_value = mock_response
 
         with patch.object(
-            self.validator, "validate_url", new_callable=AsyncMock
+            self._validator, "validate_url", new_callable=AsyncMock
         ) as mock_validate:
-            result = await self.validator.follow_redirects_safely(
+            result = await self._validator.follow_redirects_safely(
                 mock_session, "http://example.com"
             )
 
@@ -274,9 +281,9 @@ class TestSSRFValidator:
         mock_session.get.side_effect = [mock_redirect_response, mock_final_response]
 
         with patch.object(
-            self.validator, "validate_url", new_callable=AsyncMock
+            self._validator, "validate_url", new_callable=AsyncMock
         ) as mock_validate:
-            result = await self.validator.follow_redirects_safely(
+            result = await self._validator.follow_redirects_safely(
                 mock_session, "http://example.com"
             )
 
@@ -297,7 +304,7 @@ class TestSSRFValidator:
         mock_session.get.return_value = mock_redirect_response
 
         with patch.object(
-            self.validator, "validate_url", new_callable=AsyncMock
+            self._validator, "validate_url", new_callable=AsyncMock
         ) as mock_validate:
             # First validation passes (initial URL)
             # Second validation fails (redirect destination)
@@ -307,7 +314,7 @@ class TestSSRFValidator:
             ]
 
             with pytest.raises(McpError):
-                await self.validator.follow_redirects_safely(
+                _ = await self._validator.follow_redirects_safely(
                     mock_session, "http://example.com"
                 )
 
@@ -326,9 +333,9 @@ class TestSSRFValidator:
         mock_session.get.side_effect = [mock_redirect_response, mock_final_response]
 
         with patch.object(
-            self.validator, "validate_url", new_callable=AsyncMock
+            self._validator, "validate_url", new_callable=AsyncMock
         ) as mock_validate:
-            await self.validator.follow_redirects_safely(
+            _ = await self._validator.follow_redirects_safely(
                 mock_session, "http://example.com/old-path"
             )
 
@@ -346,9 +353,9 @@ class TestSSRFValidator:
 
         mock_session.get.return_value = mock_redirect_response
 
-        with patch.object(self.validator, "validate_url", new_callable=AsyncMock):
+        with patch.object(self._validator, "validate_url", new_callable=AsyncMock):
             with pytest.raises(McpError, match="Too many redirects"):
-                await self.validator.follow_redirects_safely(
+                _ = await self._validator.follow_redirects_safely(
                     mock_session, "http://example.com"
                 )
 
@@ -364,9 +371,9 @@ class TestSSRFValidator:
         mock_session.get.return_value = mock_redirect_response
 
         with patch.object(
-            self.validator, "validate_url", new_callable=AsyncMock
+            self._validator, "validate_url", new_callable=AsyncMock
         ) as mock_validate:
-            result = await self.validator.follow_redirects_safely(
+            result = await self._validator.follow_redirects_safely(
                 mock_session, "http://example.com"
             )
 
@@ -388,7 +395,7 @@ class TestSSRFValidator:
         ]
 
         for ip in blocked_ips:
-            assert self.validator._is_blocked_ip(ip), f"Should block {ip}"
+            assert self._validator._is_blocked_ip(ip), f"Should block {ip}"
 
     def test_is_blocked_ip_ipv4_public(self):
         """Test IP blocking allows IPv4 public addresses."""
@@ -399,7 +406,7 @@ class TestSSRFValidator:
         ]
 
         for ip in public_ips:
-            assert not self.validator._is_blocked_ip(ip), f"Should allow {ip}"
+            assert not self._validator._is_blocked_ip(ip), f"Should allow {ip}"
 
     def test_is_blocked_ip_ipv6_private(self):
         """Test IP blocking for IPv6 private ranges."""
@@ -412,7 +419,7 @@ class TestSSRFValidator:
         ]
 
         for ip in blocked_ips:
-            assert self.validator._is_blocked_ip(ip), f"Should block {ip}"
+            assert self._validator._is_blocked_ip(ip), f"Should block {ip}"
 
     def test_is_blocked_ip_ipv6_public(self):
         """Test IP blocking allows IPv6 public addresses."""
@@ -422,7 +429,7 @@ class TestSSRFValidator:
         ]
 
         for ip in public_ips:
-            assert not self.validator._is_blocked_ip(ip), f"Should allow {ip}"
+            assert not self._validator._is_blocked_ip(ip), f"Should allow {ip}"
 
     @pytest.mark.asyncio
     async def test_bypass_prevention_decimal_encoding(self):
@@ -431,7 +438,7 @@ class TestSSRFValidator:
         with pytest.raises(
             McpError, match="Access to private or reserved IP ranges is not allowed"
         ):
-            await self.validator.validate_url("http://2130706433")
+            await self._validator.validate_url("http://2130706433")
 
     @pytest.mark.asyncio
     async def test_comprehensive_security_validation(self):
@@ -455,7 +462,7 @@ class TestSSRFValidator:
             with pytest.raises(
                 McpError, match="Access to private or reserved IP ranges is not allowed"
             ):
-                await self.validator.validate_url(url)
+                await self._validator.validate_url(url)
 
     @pytest.mark.asyncio
     async def test_ipv4_mapped_ipv6_localhost_blocking(self):
@@ -470,7 +477,7 @@ class TestSSRFValidator:
             with pytest.raises(
                 McpError, match="Access to private or reserved IP ranges is not allowed"
             ):
-                await self.validator.validate_url(url)
+                await self._validator.validate_url(url)
 
     @pytest.mark.asyncio
     async def test_ipv4_mapped_ipv6_private_blocking(self):
@@ -486,7 +493,7 @@ class TestSSRFValidator:
             with pytest.raises(
                 McpError, match="Access to private or reserved IP ranges is not allowed"
             ):
-                await self.validator.validate_url(url)
+                await self._validator.validate_url(url)
 
     @pytest.mark.asyncio
     async def test_missing_ipv4_ranges_blocking(self):
@@ -501,7 +508,7 @@ class TestSSRFValidator:
             with pytest.raises(
                 McpError, match="Access to private or reserved IP ranges is not allowed"
             ):
-                await self.validator.validate_url(url)
+                await self._validator.validate_url(url)
 
     @pytest.mark.asyncio
     async def test_missing_ipv6_ranges_blocking(self):
@@ -514,7 +521,7 @@ class TestSSRFValidator:
             with pytest.raises(
                 McpError, match="Access to private or reserved IP ranges is not allowed"
             ):
-                await self.validator.validate_url(url)
+                await self._validator.validate_url(url)
 
     @pytest.mark.asyncio
     async def test_valid_urls_allowed(self):
@@ -527,4 +534,4 @@ class TestSSRFValidator:
 
         for url in valid_urls:
             # These should not raise exceptions
-            await self.validator.validate_url(url)
+            await self._validator.validate_url(url)

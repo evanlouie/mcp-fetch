@@ -112,7 +112,7 @@ class SessionManager:
 
     async def _cleanup_unhealthy_sessions(self) -> None:
         """Remove and close unhealthy sessions."""
-        unhealthy_configs = []
+        unhealthy_configs: list[SessionConfig] = []
 
         for config, health in self._session_health.items():
             if not health.is_healthy():
@@ -130,7 +130,7 @@ class SessionManager:
             except Exception:
                 pass  # Ignore errors during cleanup
 
-        self._session_health.pop(config, None)
+        _ = self._session_health.pop(config, None)
 
         # Clean up the lock to prevent memory leaks
         _ = self._locks.pop(config, None)
@@ -220,7 +220,7 @@ class SessionManager:
         """Close all managed sessions and cleanup resources."""
         # Cancel cleanup task
         if self._cleanup_task and not self._cleanup_task.done():
-            self._cleanup_task.cancel()
+            _ = self._cleanup_task.cancel()
             try:
                 await self._cleanup_task
             except asyncio.CancelledError:

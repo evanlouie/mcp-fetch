@@ -1,5 +1,6 @@
 import contextlib
-from typing import Annotated, Any, NamedTuple
+from collections.abc import AsyncIterator, Mapping
+from typing import Annotated, Any, NamedTuple, cast
 from urllib.parse import urlparse, urlunparse
 
 import markdownify
@@ -96,7 +97,7 @@ def get_robots_txt_url(url: str) -> str:
     return robots_url
 
 
-def _filter_headers(headers) -> dict[str, str]:
+def _filter_headers(headers: Mapping[str, str | None]) -> dict[str, str]:
     """Filter out None values from headers dictionary.
 
     :param headers: Headers dictionary potentially containing None values
@@ -145,9 +146,14 @@ async def _execute_http_request(
                     )
 
         collected_chunks: list[bytes] = []
-        total = 0
-        async for chunk in response.aiter_content(chunk_size=65536):
-            total += len(chunk)
+        total: int = 0
+        response_any = cast(Any, response)
+        content_iter = cast(
+            AsyncIterator[bytes], response_any.aiter_content(chunk_size=65536)
+        )
+        async for raw_chunk in content_iter:
+            chunk_bytes = raw_chunk
+            total += len(chunk_bytes)
             if total > MAX_RESPONSE_BODY_SIZE:
                 raise McpError(
                     ErrorData(
@@ -158,7 +164,7 @@ async def _execute_http_request(
                         ),
                     )
                 )
-            collected_chunks.append(chunk)
+            collected_chunks.append(chunk_bytes)
         body_bytes = b"".join(collected_chunks)
     finally:
         with contextlib.suppress(Exception):
@@ -173,7 +179,7 @@ async def _execute_http_request(
     return HttpResponse(
         content=text,
         status_code=response.status_code,
-        headers=_filter_headers(response.headers),
+        headers=_filter_headers(cast(Mapping[str, str | None], response.headers)),
         url=response.url,
     )
 
@@ -377,7 +383,7 @@ def process_content(
     http_response = HttpResponse(
         content=page_raw,
         status_code=response.status_code,
-        headers=_filter_headers(response.headers),
+        headers=_filter_headers(cast(Mapping[str, str | None], response.headers)),
         url=response.url,
     )
     processed = _process_response_content(http_response, force_raw)
@@ -561,7 +567,7 @@ This tool uses Chrome browser impersonation to access websites that might otherw
     # Use AsyncExitStack for proper cleanup of SessionManager
     async with contextlib.AsyncExitStack() as stack:
         # Ensure SessionManager cleanup on exit
-        stack.push_async_callback(session_manager.close_all)
+        _ = stack.push_async_callback(session_manager.close_all)
 
         # Start the server
         read_stream, write_stream = await stack.enter_async_context(stdio_server())

@@ -70,10 +70,10 @@ class TestHttpConfig:
     def test_validation_errors(self):
         """Test Pydantic validation errors."""
         with pytest.raises(Exception):  # ValidationError
-            HttpConfig(timeout=-1)  # Invalid timeout
+            _ = HttpConfig(timeout=-1)  # Invalid timeout
 
         with pytest.raises(Exception):  # ValidationError
-            HttpConfig(timeout=1000)  # Timeout too large
+            _ = HttpConfig(timeout=1000)  # Timeout too large
 
 
 class TestHttpResponse:
@@ -148,7 +148,7 @@ class TestExecuteHttpRequest:
 
         config = HttpConfig(proxy_url="http://proxy.example.com:8080")
 
-        await _execute_http_request(
+        _ = await _execute_http_request(
             "https://example.com", mock_session, config, mock_ssrf_validator
         )
 
@@ -174,7 +174,7 @@ class TestExecuteHttpRequest:
         config = HttpConfig()
 
         with pytest.raises(RequestException, match="Connection failed"):
-            await _execute_http_request(
+            _ = await _execute_http_request(
                 "https://example.com", mock_session, config, mock_ssrf_validator
             )
 
@@ -227,7 +227,7 @@ class TestExecuteHttpRequest:
         )
 
         with pytest.raises(McpError, match="exceeded"):
-            await _execute_http_request(
+            _ = await _execute_http_request(
                 "https://example.com", mock_session, HttpConfig(), mock_ssrf_validator
             )
 
@@ -569,7 +569,7 @@ class TestIntegration:
             ]
 
             with pytest.raises(McpError, match="Still failing"):
-                await fetch_url_pooled("https://example.com", mock_session_manager)
+                _ = await fetch_url_pooled("https://example.com", mock_session_manager)
 
             assert mock_execute.call_count == 2
             assert mock_session_manager.get_session.call_count == 2
@@ -618,13 +618,13 @@ class TestIntegration:
             # Test client error (4xx)
             mock_execute.return_value = mock_http_response_client_error
             with pytest.raises(McpError) as exc_info:
-                await fetch_url_legacy("https://example.com")
+                _ = await fetch_url_legacy("https://example.com")
             assert "Client error" in str(exc_info.value)
             assert "HTTP 404" in str(exc_info.value)
 
             # Test server error (5xx)
             mock_execute.return_value = mock_http_response_server_error
             with pytest.raises(McpError) as exc_info:
-                await fetch_url_legacy("https://example.com")
+                _ = await fetch_url_legacy("https://example.com")
             assert "Server error" in str(exc_info.value)
             assert "HTTP 500" in str(exc_info.value)
