@@ -29,6 +29,8 @@ from .ssrf_validator import SSRFValidator
 HTTP_CLIENT_ERROR_THRESHOLD = 400
 HTTP_SERVER_ERROR_THRESHOLD = 500
 CONTENT_INSPECTION_SIZE = 2000
+# Limit total response body read into memory (bytes)
+MAX_RESPONSE_BODY_SIZE = 2_000_000  # ~2 MB
 
 # Default user agent string
 DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -124,10 +126,52 @@ async def _execute_http_request(
         headers={"User-Agent": config.user_agent},
         timeout=config.timeout,
         proxy=config.proxy_url,
+        stream=True,
     )
 
+    try:
+        declared_length = response.headers.get("content-length")
+        if declared_length is not None:
+            with contextlib.suppress(ValueError):
+                if int(declared_length) > MAX_RESPONSE_BODY_SIZE:
+                    raise McpError(
+                        ErrorData(
+                            code=INTERNAL_ERROR,
+                            message=(
+                                f"Failed to fetch {url}: response exceeded "
+                                f"{MAX_RESPONSE_BODY_SIZE} byte limit"
+                            ),
+                        )
+                    )
+
+        collected_chunks: list[bytes] = []
+        total = 0
+        async for chunk in response.aiter_content(chunk_size=65536):
+            total += len(chunk)
+            if total > MAX_RESPONSE_BODY_SIZE:
+                raise McpError(
+                    ErrorData(
+                        code=INTERNAL_ERROR,
+                        message=(
+                            f"Failed to fetch {url}: response exceeded "
+                            f"{MAX_RESPONSE_BODY_SIZE} byte limit"
+                        ),
+                    )
+                )
+            collected_chunks.append(chunk)
+        body_bytes = b"".join(collected_chunks)
+    finally:
+        with contextlib.suppress(Exception):
+            await response.aclose()
+
+    encoding = response.encoding or "utf-8"
+    try:
+        text = body_bytes.decode(encoding, errors="replace")
+    except LookupError:
+        text = body_bytes.decode("utf-8", errors="replace")
+
     return HttpResponse(
-        content=response.text,
+        content=text,
         status_code=response.status_code,
         headers=_filter_headers(response.headers),
         url=response.url,
@@ -238,28 +282,27 @@ async def fetch_url_pooled(
         # Get session from manager
         session = await session_manager.get_session(session_config)
 
-        try:
-            # Execute HTTP request
-            response = await _execute_http_request(
-                url, session, http_config, ssrf_validator
-            )
-        except RequestException as e:
-            # Handle request error and potentially recreate session
-            should_recreate = await session_manager.handle_request_error(
-                session_config, e
-            )
-            if should_recreate:
-                # Retry once with new session
-                session = await session_manager.get_session(session_config)
+        attempt = 0
+        while True:
+            attempt += 1
+            try:
+                # Execute HTTP request
                 response = await _execute_http_request(
                     url, session, http_config, ssrf_validator
                 )
-            else:
+                break
+            except RequestException as e:
+                should_recreate = await session_manager.handle_request_error(
+                    session_config, e
+                )
+                if should_recreate and attempt < 2:
+                    session = await session_manager.get_session(session_config)
+                    continue
                 raise McpError(
                     ErrorData(
                         code=INTERNAL_ERROR, message=f"Failed to fetch {url}: {e!r}"
                     )
-                )
+                ) from e
 
         # Validate response and process content
         _validate_http_response(response)

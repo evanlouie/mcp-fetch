@@ -14,7 +14,36 @@ from .server import (
     fetch_url_legacy,
     fetch_url_pooled,
     process_content,
+    MAX_RESPONSE_BODY_SIZE,
 )
+
+
+class DummyAsyncResponse:
+    """Minimal async response wrapper to exercise streaming behaviour in tests."""
+
+    def __init__(
+        self,
+        body: bytes,
+        *,
+        status_code: int = 200,
+        headers: dict[str, str | None] | None = None,
+        url: str = "https://example.com",
+        encoding: str | None = "utf-8",
+    ) -> None:
+        self._body: bytes = body
+        self.status_code: int = status_code
+        self.headers: dict[str, str | None] = headers or {}
+        self.url: str = url
+        self.encoding: str | None = encoding
+        self.closed: bool = False
+
+    async def aiter_content(self, chunk_size: int = 65536):
+        """Yield the body in chunks."""
+        for start in range(0, len(self._body), chunk_size):
+            yield self._body[start : start + chunk_size]
+
+    async def aclose(self) -> None:
+        self.closed = True
 
 
 class TestHttpConfig:
@@ -70,13 +99,11 @@ class TestExecuteHttpRequest:
     @pytest.mark.asyncio
     async def test_successful_request(self):
         """Test successful HTTP request execution."""
-        # Mock session and response
         mock_session = AsyncMock()
-        mock_response = Mock()
-        mock_response.text = "<html>Test content</html>"
-        mock_response.status_code = 200
-        mock_response.headers = {"content-type": "text/html", "server": "nginx"}
-        mock_response.url = "https://example.com"
+        mock_response = DummyAsyncResponse(
+            b"<html>Test content</html>",
+            headers={"content-type": "text/html", "server": "nginx"},
+        )
 
         # Mock SSRF validator
         mock_ssrf_validator = Mock()
@@ -103,17 +130,16 @@ class TestExecuteHttpRequest:
             headers={"User-Agent": config.user_agent},
             timeout=30,
             proxy=None,
+            stream=True,
         )
 
     @pytest.mark.asyncio
     async def test_request_with_proxy(self):
         """Test HTTP request with proxy configuration."""
         mock_session = AsyncMock()
-        mock_response = Mock()
-        mock_response.text = "Content"
-        mock_response.status_code = 200
-        mock_response.headers = {"content-type": "text/plain"}
-        mock_response.url = "https://example.com"
+        mock_response = DummyAsyncResponse(
+            b"Content", headers={"content-type": "text/plain"}
+        )
 
         mock_ssrf_validator = Mock()
         mock_ssrf_validator.follow_redirects_safely = AsyncMock(
@@ -133,6 +159,7 @@ class TestExecuteHttpRequest:
             headers={"User-Agent": config.user_agent},
             timeout=30,
             proxy="http://proxy.example.com:8080",
+            stream=True,
         )
 
     @pytest.mark.asyncio
@@ -155,15 +182,14 @@ class TestExecuteHttpRequest:
     async def test_headers_with_none_values(self):
         """Test handling of headers with None values."""
         mock_session = AsyncMock()
-        mock_response = Mock()
-        mock_response.text = "Content"
-        mock_response.status_code = 200
-        mock_response.headers = {
-            "content-type": "text/html",
-            "server": None,
-            "cache-control": "no-cache",
-        }
-        mock_response.url = "https://example.com"
+        mock_response = DummyAsyncResponse(
+            b"Content",
+            headers={
+                "content-type": "text/html",
+                "server": None,
+                "cache-control": "no-cache",
+            },
+        )
 
         mock_ssrf_validator = Mock()
         mock_ssrf_validator.follow_redirects_safely = AsyncMock(
@@ -181,6 +207,29 @@ class TestExecuteHttpRequest:
             "content-type": "text/html",
             "cache-control": "no-cache",
         }
+
+    @pytest.mark.asyncio
+    async def test_response_exceeds_max_size(self):
+        """Ensure oversized responses raise McpError before processing."""
+        mock_session = AsyncMock()
+        oversized = b"x" * (MAX_RESPONSE_BODY_SIZE + 1)
+        mock_response = DummyAsyncResponse(
+            oversized,
+            headers={
+                "content-type": "text/plain",
+                "content-length": str(MAX_RESPONSE_BODY_SIZE + 1),
+            },
+        )
+
+        mock_ssrf_validator = Mock()
+        mock_ssrf_validator.follow_redirects_safely = AsyncMock(
+            return_value=mock_response
+        )
+
+        with pytest.raises(McpError, match="exceeded"):
+            await _execute_http_request(
+                "https://example.com", mock_session, HttpConfig(), mock_ssrf_validator
+            )
 
 
 class TestValidateHttpResponse:
@@ -500,7 +549,31 @@ class TestIntegration:
             # Verify retry logic
             assert mock_execute.call_count == 2
             assert mock_session_manager.get_session.call_count == 2
-            mock_session_manager.handle_request_error.assert_called_once()
+            assert mock_session_manager.handle_request_error.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_fetch_url_pooled_retry_failure(self):
+        """Retry failure should surface as McpError instead of raw exception."""
+
+        mock_session_manager = AsyncMock()
+        mock_session = AsyncMock()
+        mock_session_manager.get_session.return_value = mock_session
+        mock_session_manager.handle_request_error.return_value = True
+
+        with patch(
+            "mcp_server_fetch.server._execute_http_request", new_callable=AsyncMock
+        ) as mock_execute:
+            mock_execute.side_effect = [
+                RequestException("Connection failed"),
+                RequestException("Still failing"),
+            ]
+
+            with pytest.raises(McpError, match="Still failing"):
+                await fetch_url_pooled("https://example.com", mock_session_manager)
+
+            assert mock_execute.call_count == 2
+            assert mock_session_manager.get_session.call_count == 2
+            assert mock_session_manager.handle_request_error.await_count == 2
 
     def test_process_content_legacy_wrapper(self):
         """Test the backward compatibility wrapper for process_content."""

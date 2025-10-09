@@ -30,8 +30,8 @@ mcp-server-fetch = "mcp_server_fetch:main"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "basedpyright>=1.31.2",
     "ruff>=0.7.3",
     "pytest>=8.0.0",
@@ -41,6 +41,7 @@ dev-dependencies = [
 [tool.basedpyright]
 reportMissingTypeStubs = false
 reportExplicitAny = false
+reportAny = false
 
 # Ignore stub files completely to avoid noise from third-party type definitions
 ignore = ["typings/**/*.pyi"]

@@ -24,6 +24,11 @@ class SessionConfig:
     verify_ssl: bool = True
 
 
+SESSION_MAX_AGE = timedelta(hours=1)
+SESSION_IDLE_GRACE_PERIOD = timedelta(minutes=5)
+SESSION_MAX_ERRORS = 3
+
+
 @dataclass
 class SessionHealth:
     """Tracks session health metrics for automatic recreation."""
@@ -35,12 +40,18 @@ class SessionHealth:
 
     def is_healthy(self) -> bool:
         """Check if session is healthy based on error rate and age."""
-        max_age = timedelta(hours=1)
-        max_errors = 3
+        now = datetime.now()
 
-        return (
-            self.error_count < max_errors and datetime.now() - self.created_at < max_age
-        )
+        if self.error_count >= SESSION_MAX_ERRORS:
+            return False
+
+        age = now - self.created_at
+        if age < SESSION_MAX_AGE:
+            return True
+
+        # Allow recently-used sessions to stay alive even if they are old.
+        idle_time = now - self.last_used
+        return idle_time < SESSION_IDLE_GRACE_PERIOD
 
     def record_success(self) -> None:
         """Record successful request."""

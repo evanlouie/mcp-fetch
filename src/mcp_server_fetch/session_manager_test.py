@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timedelta
 
 import pytest
 from curl_cffi.requests.exceptions import RequestException
@@ -210,3 +211,29 @@ class TestSessionManager:
 
             # Verify all locks are cleaned up after close_all
             assert len(session_manager._locks) == 0
+
+    @pytest.mark.asyncio
+    async def test_cleanup_respects_recent_activity(self) -> None:
+        """Old but recently used sessions should not be eagerly closed."""
+        session_manager = SessionManager()
+
+        try:
+            config = SessionConfig()
+            session = await session_manager.get_session(config)
+            assert session is not None
+
+            health = session_manager._session_health[config]
+            # Simulate a session created long ago but used moments ago
+            health.created_at -= timedelta(hours=2)
+            health.last_used = datetime.now()
+
+            await session_manager._cleanup_unhealthy_sessions()
+            assert config in session_manager._sessions
+
+            # Now mark it idle beyond the grace period
+            health.last_used -= timedelta(minutes=10)
+            await session_manager._cleanup_unhealthy_sessions()
+            assert config not in session_manager._sessions
+
+        finally:
+            await session_manager.close_all()
