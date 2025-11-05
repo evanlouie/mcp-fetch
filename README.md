@@ -11,8 +11,15 @@ This is a fork of the [original MCP fetch server](https://github.com/modelcontex
 - **Chunked Reading**: Support for reading large webpages in chunks using `start_index`
 - **Browser Headers**: Uses realistic Chrome browser headers for better compatibility
 
-> [!CAUTION]
-> This server can access local/internal IP addresses and may represent a security risk. Exercise caution when using this MCP server to ensure this does not expose any sensitive data.
+> [!NOTE]
+> **Security Features**: This server includes comprehensive SSRF (Server-Side Request Forgery) protection that blocks access to:
+> - Private IP addresses (RFC 1918: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
+> - Localhost and loopback addresses (127.0.0.0/8, ::1)
+> - Link-local addresses (169.254.0.0/16) including cloud metadata endpoints
+> - Reserved, multicast, and documentation IP ranges
+> - IPv4-mapped IPv6 addresses
+>
+> The server validates all URLs before fetching, including redirect destinations, with DNS resolution timeout protection. Response sizes are limited to 2MB to prevent resource exhaustion.
 
 The fetch tool will truncate the response, but by using the `start_index` argument, you can specify where to start the content extraction. This lets models read a webpage in chunks, until they find the information they need.
 

@@ -18,6 +18,7 @@ class SessionConfig:
 
     impersonate: str = "chrome"
     proxy_url: str | None = None
+    timeout: int = 30
     max_connections: int = 25
     max_connections_per_host: int = 6
     keep_alive_timeout: float = 60.0
@@ -182,7 +183,7 @@ class SessionManager:
         # Configure session parameters based on config
         session_kwargs: dict[str, Any] = {
             "impersonate": config.impersonate,
-            "timeout": 30,  # Default request timeout
+            "timeout": config.timeout,
         }
 
         # Add proxy if specified

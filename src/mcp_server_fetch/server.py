@@ -282,6 +282,7 @@ async def fetch_url_pooled(
     session_config = SessionConfig(
         impersonate="chrome",
         proxy_url=proxy_url,
+        timeout=http_config.timeout,
     )
 
     try:
