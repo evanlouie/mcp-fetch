@@ -371,15 +371,6 @@ async def serve(
     # Create SessionManager for connection pooling
     session_manager = SessionManager()
 
-    async def fetch_with_session_manager(
-        url: str, force_raw: bool = False, proxy_url_override: str | None = None
-    ) -> tuple[str, str]:
-        """Fetch URL using SessionManager with fallback."""
-        effective_proxy_url = proxy_url_override or proxy_url
-        return await fetch_url_with_fallback(
-            url, session_manager, force_raw, effective_proxy_url
-        )
-
     @server.list_tools()
     async def list_tools() -> list[Tool]:
         """List available tools for the MCP server.
@@ -430,26 +421,21 @@ This tool uses Chrome browser impersonation to access websites that might otherw
 
         url = str(args.url)
 
-        content, prefix = await fetch_with_session_manager(url, force_raw=args.raw)
+        content, prefix = await fetch_url_with_fallback(
+            url, session_manager, force_raw=args.raw, proxy_url=proxy_url
+        )
         original_length = len(content)
         if args.start_index >= original_length:
             content = "<error>No more content available.</error>"
         else:
-            truncated_content = content[
-                args.start_index : args.start_index + args.max_length
-            ]
-            if not truncated_content:
-                content = "<error>No more content available.</error>"
-            else:
-                content = truncated_content
-                actual_content_length = len(truncated_content)
-                remaining_content = original_length - (
-                    args.start_index + actual_content_length
-                )
-                # Only add the prompt to continue fetching if there is still remaining content
-                if actual_content_length == args.max_length and remaining_content > 0:
-                    next_start = args.start_index + actual_content_length
-                    content += f"\n\n<error>Content truncated. Call the fetch tool with a start_index of {next_start} to get more content.</error>"
+            content = content[args.start_index : args.start_index + args.max_length]
+            actual_content_length = len(content)
+            remaining_content = original_length - (
+                args.start_index + actual_content_length
+            )
+            if actual_content_length == args.max_length and remaining_content > 0:
+                next_start = args.start_index + actual_content_length
+                content += f"\n\n<error>Content truncated. Call the fetch tool with a start_index of {next_start} to get more content.</error>"
         return [TextContent(type="text", text=f"{prefix}Contents:\n{content}")]
 
     @server.get_prompt()
@@ -470,7 +456,9 @@ This tool uses Chrome browser impersonation to access websites that might otherw
 
         url = str(args.url)
         try:
-            content, prefix = await fetch_with_session_manager(url)
+            content, prefix = await fetch_url_with_fallback(
+                url, session_manager, proxy_url=proxy_url
+            )
             # TODO: after SDK bug is addressed, don't catch the exception
         except McpError as e:
             return GetPromptResult(
@@ -493,11 +481,7 @@ This tool uses Chrome browser impersonation to access websites that might otherw
 
     options = server.create_initialization_options()
 
-    # Use AsyncExitStack for proper cleanup of SessionManager
     async with contextlib.AsyncExitStack() as stack:
-        # Ensure SessionManager cleanup on exit
         _ = stack.push_async_callback(session_manager.close_all)
-
-        # Start the server
         read_stream, write_stream = await stack.enter_async_context(stdio_server())
         await server.run(read_stream, write_stream, options, raise_exceptions=True)

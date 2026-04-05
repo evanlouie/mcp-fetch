@@ -68,7 +68,6 @@ class TestSessionManager:
             # Check initial health state
             health = session_manager._session_health.get(config)
             assert health is not None
-            assert health.request_count == 0  # Initial state for new session
             assert health.error_count == 0
             assert health.is_healthy()
 

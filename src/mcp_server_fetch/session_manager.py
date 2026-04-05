@@ -27,7 +27,6 @@ class SessionHealth:
 
     last_used: datetime = field(default_factory=datetime.now)
     error_count: int = 0
-    request_count: int = 0
     created_at: datetime = field(default_factory=datetime.now)
 
     def is_healthy(self) -> bool:
@@ -45,10 +44,9 @@ class SessionHealth:
         idle_time = now - self.last_used
         return idle_time < SESSION_IDLE_GRACE_PERIOD
 
-    def record_success(self) -> None:
-        """Record successful request."""
+    def record_use(self) -> None:
+        """Record that the session was accessed."""
         self.last_used = datetime.now()
-        self.request_count += 1
 
     def record_error(self) -> None:
         """Record request error."""
@@ -124,7 +122,6 @@ class SessionManager:
 
         _ = self._session_health.pop(config, None)
 
-        # Clean up the lock to prevent memory leaks
         _ = self._locks.pop(config, None)
 
     async def get_session(self, config: SessionConfig) -> AsyncSession[Response]:
@@ -134,21 +131,19 @@ class SessionManager:
         :returns: AsyncSession instance ready for requests
         :raises SessionManagerError: If session creation fails repeatedly
         """
-        if self._cleanup_task is None or self._cleanup_task.done():
-            self._start_cleanup_task()
+        self._start_cleanup_task()
 
-        # Fast path: healthy session already exists (read-only, no teardown)
         if config in self._sessions:
             health = self._session_health.get(config)
             if health and health.is_healthy():
-                health.record_success()
+                health.record_use()
                 return self._sessions[config]
 
         async with self._locks[config]:
             if config in self._sessions:
                 health = self._session_health.get(config)
                 if health and health.is_healthy():
-                    health.record_success()
+                    health.record_use()
                     return self._sessions[config]
                 else:
                     await self._close_session(config)
