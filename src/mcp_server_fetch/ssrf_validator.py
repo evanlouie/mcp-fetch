@@ -147,7 +147,6 @@ class SSRFValidator:
         current_url = initial_url
         redirect_count = 0
 
-        # Validate the initial URL
         await self.validate_url(current_url)
 
         while redirect_count <= self.MAX_REDIRECTS:
@@ -173,7 +172,6 @@ class SSRFValidator:
             current_url = next_url
             redirect_count += 1
 
-        # Too many redirects
         raise McpError(ErrorData(code=INVALID_PARAMS, message="Too many redirects"))
 
     def _is_blocked_ip(self, ip: IPv4Address | IPv6Address) -> bool:

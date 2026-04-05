@@ -26,10 +26,7 @@ class TestSessionManager:
             session2 = await session_manager.get_session(config)
             assert session2 is session1, "Sessions should be reused for same config"
 
-            # Verify metrics
-            metrics = session_manager.get_metrics()
-            assert metrics["active_sessions"] == 1
-            assert metrics["configurations"] == 1
+            assert len(session_manager._sessions) == 1
 
         finally:
             await session_manager.close_all()
@@ -51,10 +48,7 @@ class TestSessionManager:
                 "Different configs should get different sessions"
             )
 
-            # Verify metrics
-            metrics = session_manager.get_metrics()
-            assert metrics["active_sessions"] == 2
-            assert metrics["configurations"] == 2
+            assert len(session_manager._sessions) == 2
 
         finally:
             await session_manager.close_all()
@@ -151,9 +145,7 @@ class TestSessionManager:
                     "Concurrent access should return same session"
                 )
 
-            # Should only have one active session
-            metrics = session_manager.get_metrics()
-            assert metrics["active_sessions"] == 1
+            assert len(session_manager._sessions) == 1
 
         finally:
             await session_manager.close_all()

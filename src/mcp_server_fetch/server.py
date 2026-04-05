@@ -1,8 +1,6 @@
 import contextlib
 from collections.abc import AsyncIterator, Mapping
 from typing import Annotated, Any, NamedTuple, cast
-from urllib.parse import urlparse, urlunparse
-
 import markdownify
 import readabilipy.simple_json
 from curl_cffi.requests import AsyncSession, Response
@@ -26,15 +24,14 @@ from pydantic import BaseModel, Field, HttpUrl, ValidationError
 from .session_manager import SessionConfig, SessionManager, SessionManagerError
 from .ssrf_validator import SSRFValidator
 
-# Constants for HTTP status codes and content inspection
 HTTP_CLIENT_ERROR_THRESHOLD = 400
 HTTP_SERVER_ERROR_THRESHOLD = 500
 CONTENT_INSPECTION_SIZE = 2000
-# Limit total response body read into memory (bytes)
 MAX_RESPONSE_BODY_SIZE = 2_000_000  # ~2 MB
 
-# Default user agent string
 DEFAULT_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+
+_SSRF_VALIDATOR = SSRFValidator()
 
 
 class ProcessedContent(NamedTuple):
@@ -80,16 +77,6 @@ def extract_content_from_html(html: str) -> str:
         return "<error>Page failed to be simplified from HTML</error>"
     content = markdownify.markdownify(ret["content"], heading_style=markdownify.ATX)
     return content
-
-
-def get_robots_txt_url(url: str) -> str:
-    """Get the robots.txt URL for a given website URL.
-
-    :param url: Website URL to get robots.txt for
-    :returns: URL of the robots.txt file
-    """
-    parsed = urlparse(url)
-    return urlunparse((parsed.scheme, parsed.netloc, "/robots.txt", "", "", ""))
 
 
 def _filter_headers(headers: Mapping[str, str | None]) -> dict[str, str]:
@@ -179,7 +166,6 @@ def _validate_http_response(response: HttpResponse) -> None:
     :raises McpError: If status indicates error
     """
     if response.status_code >= HTTP_CLIENT_ERROR_THRESHOLD:
-        # Distinguish between client errors (4xx) and server errors (5xx)
         if response.status_code >= HTTP_SERVER_ERROR_THRESHOLD:
             error_type = "Server error"
         else:
@@ -223,6 +209,19 @@ def _process_response_content(
     )
 
 
+def _response_pipeline(response: HttpResponse, force_raw: bool) -> tuple[str, str]:
+    """Validate response and process content.
+
+    :param response: HTTP response to process
+    :param force_raw: Whether to skip HTML processing
+    :returns: Tuple of (content, prefix)
+    :raises McpError: If status indicates error
+    """
+    _validate_http_response(response)
+    processed = _process_response_content(response, force_raw)
+    return processed.content, processed.prefix
+
+
 async def fetch_url_with_fallback(
     url: str,
     session_manager: SessionManager,
@@ -242,7 +241,6 @@ async def fetch_url_with_fallback(
     try:
         return await fetch_url_pooled(url, session_manager, force_raw, proxy_url)
     except SessionManagerError:
-        # Fallback to per-request session
         return await fetch_url_legacy(url, force_raw, proxy_url)
 
 
@@ -262,9 +260,7 @@ async def fetch_url_pooled(
               and prefix is a status message string
     :raises McpError: If the request fails or returns an error status code
     """
-    ssrf_validator = SSRFValidator()
     http_config = HttpConfig(proxy_url=proxy_url)
-
     session_config = SessionConfig(
         impersonate="chrome",
         proxy_url=proxy_url,
@@ -278,7 +274,7 @@ async def fetch_url_pooled(
             attempt += 1
             try:
                 response = await _execute_http_request(
-                    url, session, http_config, ssrf_validator
+                    url, session, http_config, _SSRF_VALIDATOR
                 )
                 break
             except RequestException as e:
@@ -294,9 +290,7 @@ async def fetch_url_pooled(
                     )
                 ) from e
 
-        _validate_http_response(response)
-        processed = _process_response_content(response, force_raw)
-        return processed.content, processed.prefix
+        return _response_pipeline(response, force_raw)
 
     except SessionManagerError as e:
         raise SessionManagerError(f"Session manager failed: {e}") from e
@@ -316,18 +310,14 @@ async def fetch_url_legacy(
               and prefix is a status message string
     :raises McpError: If the request fails or returns an error status code
     """
-    ssrf_validator = SSRFValidator()
     http_config = HttpConfig(proxy_url=proxy_url)
 
     async with AsyncSession[Response](impersonate="chrome") as session:
         try:
             response = await _execute_http_request(
-                url, session, http_config, ssrf_validator
+                url, session, http_config, _SSRF_VALIDATOR
             )
-
-            _validate_http_response(response)
-            processed = _process_response_content(response, force_raw)
-            return processed.content, processed.prefix
+            return _response_pipeline(response, force_raw)
 
         except RequestException as e:
             raise McpError(

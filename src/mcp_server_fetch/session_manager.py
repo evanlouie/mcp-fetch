@@ -10,18 +10,10 @@ from curl_cffi.requests.exceptions import RequestException
 
 @dataclass(frozen=True)
 class SessionConfig:
-    """Configuration for AsyncSession creation.
-
-    This dataclass serves as a hashable key for session caching,
-    ensuring different configurations get separate session instances.
-    """
+    """Hashable key for session caching."""
 
     impersonate: str = "chrome"
     proxy_url: str | None = None
-    max_connections: int = 25
-    max_connections_per_host: int = 6
-    keep_alive_timeout: float = 60.0
-    verify_ssl: bool = True
 
 
 SESSION_MAX_AGE = timedelta(hours=1)
@@ -145,31 +137,29 @@ class SessionManager:
         if self._cleanup_task is None or self._cleanup_task.done():
             self._start_cleanup_task()
 
+        # Fast path: healthy session already exists (read-only, no teardown)
         if config in self._sessions:
             health = self._session_health.get(config)
             if health and health.is_healthy():
-                health.last_used = datetime.now()
+                health.record_success()
                 return self._sessions[config]
-            else:
-                # Remove unhealthy session
-                await self._close_session(config)
 
-        # Create new session with per-config locking
         async with self._locks[config]:
-            # Double-check after acquiring lock
             if config in self._sessions:
                 health = self._session_health.get(config)
                 if health and health.is_healthy():
-                    health.last_used = datetime.now()
+                    health.record_success()
                     return self._sessions[config]
+                else:
+                    await self._close_session(config)
 
-            # Create new session
             try:
                 session = self._create_session(config)
                 self._sessions[config] = session
                 self._session_health[config] = SessionHealth()
                 return session
             except Exception as e:
+                _ = self._locks.pop(config, None)
                 raise SessionManagerError(f"Failed to create session: {e}") from e
 
     def _create_session(self, config: SessionConfig) -> AsyncSession[Response]:
@@ -180,7 +170,6 @@ class SessionManager:
         """
         session_kwargs: dict[str, Any] = {
             "impersonate": config.impersonate,
-            "timeout": 30,  # Default request timeout
         }
 
         if config.proxy_url:
@@ -222,23 +211,3 @@ class SessionManager:
         for config in list(self._sessions.keys()):
             await self._close_session(config)
 
-    def get_metrics(self) -> dict[str, Any]:
-        """Get connection pool metrics for monitoring.
-
-        :returns: Dictionary containing session metrics
-        """
-        total_sessions = len(self._sessions)
-        total_requests = sum(
-            health.request_count for health in self._session_health.values()
-        )
-        total_errors = sum(
-            health.error_count for health in self._session_health.values()
-        )
-
-        return {
-            "active_sessions": total_sessions,
-            "total_requests": total_requests,
-            "total_errors": total_errors,
-            "error_rate": total_errors / max(total_requests, 1),
-            "configurations": len(self._sessions),
-        }
