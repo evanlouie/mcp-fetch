@@ -94,8 +94,7 @@ class SSRFValidator:
         :raises McpError: If resolution fails or any IP is blocked
         """
         try:
-            # Async DNS resolution with timeout
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             addrinfo = await asyncio.wait_for(
                 loop.getaddrinfo(
                     hostname, None, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM

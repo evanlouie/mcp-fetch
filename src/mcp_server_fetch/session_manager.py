@@ -142,14 +142,13 @@ class SessionManager:
         :returns: AsyncSession instance ready for requests
         :raises SessionManagerError: If session creation fails repeatedly
         """
-        # Start cleanup task if not already started (lazy initialization)
-        self._start_cleanup_task()
+        if self._cleanup_task is None or self._cleanup_task.done():
+            self._start_cleanup_task()
 
-        # Check if existing session is healthy
         if config in self._sessions:
             health = self._session_health.get(config)
             if health and health.is_healthy():
-                health.record_success()
+                health.last_used = datetime.now()
                 return self._sessions[config]
             else:
                 # Remove unhealthy session
@@ -157,11 +156,11 @@ class SessionManager:
 
         # Create new session with per-config locking
         async with self._locks[config]:
-            # Double-check pattern - another coroutine might have created it
+            # Double-check after acquiring lock
             if config in self._sessions:
                 health = self._session_health.get(config)
                 if health and health.is_healthy():
-                    health.record_success()
+                    health.last_used = datetime.now()
                     return self._sessions[config]
 
             # Create new session
@@ -179,18 +178,13 @@ class SessionManager:
         :param config: Configuration for the new session
         :returns: Configured AsyncSession instance
         """
-        # Configure session parameters based on config
         session_kwargs: dict[str, Any] = {
             "impersonate": config.impersonate,
             "timeout": 30,  # Default request timeout
         }
 
-        # Add proxy if specified
         if config.proxy_url:
             session_kwargs["proxy"] = config.proxy_url
-
-        # Note: curl_cffi doesn't expose connection pool configuration directly
-        # Connection pooling is handled internally by curl_cffi
 
         return AsyncSession[Response](**session_kwargs)
 
@@ -218,7 +212,6 @@ class SessionManager:
 
     async def close_all(self) -> None:
         """Close all managed sessions and cleanup resources."""
-        # Cancel cleanup task
         if self._cleanup_task and not self._cleanup_task.done():
             _ = self._cleanup_task.cancel()
             try:
@@ -226,13 +219,8 @@ class SessionManager:
             except asyncio.CancelledError:
                 pass
 
-        # Close all sessions
         for config in list(self._sessions.keys()):
             await self._close_session(config)
-
-        self._sessions.clear()
-        self._session_health.clear()
-        self._locks.clear()
 
     def get_metrics(self) -> dict[str, Any]:
         """Get connection pool metrics for monitoring.
@@ -252,5 +240,5 @@ class SessionManager:
             "total_requests": total_requests,
             "total_errors": total_errors,
             "error_rate": total_errors / max(total_requests, 1),
-            "configurations": len(set(self._sessions.keys())),
+            "configurations": len(self._sessions),
         }

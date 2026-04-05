@@ -88,13 +88,8 @@ def get_robots_txt_url(url: str) -> str:
     :param url: Website URL to get robots.txt for
     :returns: URL of the robots.txt file
     """
-    # Parse the URL into components
     parsed = urlparse(url)
-
-    # Reconstruct the base URL with just scheme, netloc, and /robots.txt path
-    robots_url = urlunparse((parsed.scheme, parsed.netloc, "/robots.txt", "", "", ""))
-
-    return robots_url
+    return urlunparse((parsed.scheme, parsed.netloc, "/robots.txt", "", "", ""))
 
 
 def _filter_headers(headers: Mapping[str, str | None]) -> dict[str, str]:
@@ -131,19 +126,21 @@ async def _execute_http_request(
     )
 
     try:
+        oversize_error = McpError(
+            ErrorData(
+                code=INTERNAL_ERROR,
+                message=(
+                    f"Failed to fetch {url}: response exceeded "
+                    f"{MAX_RESPONSE_BODY_SIZE} byte limit"
+                ),
+            )
+        )
+
         declared_length = response.headers.get("content-length")
         if declared_length is not None:
             with contextlib.suppress(ValueError):
                 if int(declared_length) > MAX_RESPONSE_BODY_SIZE:
-                    raise McpError(
-                        ErrorData(
-                            code=INTERNAL_ERROR,
-                            message=(
-                                f"Failed to fetch {url}: response exceeded "
-                                f"{MAX_RESPONSE_BODY_SIZE} byte limit"
-                            ),
-                        )
-                    )
+                    raise oversize_error
 
         collected_chunks: list[bytes] = []
         total: int = 0
@@ -151,20 +148,11 @@ async def _execute_http_request(
         content_iter = cast(
             AsyncIterator[bytes], response_any.aiter_content(chunk_size=65536)
         )
-        async for raw_chunk in content_iter:
-            chunk_bytes = raw_chunk
-            total += len(chunk_bytes)
+        async for chunk in content_iter:
+            total += len(chunk)
             if total > MAX_RESPONSE_BODY_SIZE:
-                raise McpError(
-                    ErrorData(
-                        code=INTERNAL_ERROR,
-                        message=(
-                            f"Failed to fetch {url}: response exceeded "
-                            f"{MAX_RESPONSE_BODY_SIZE} byte limit"
-                        ),
-                    )
-                )
-            collected_chunks.append(chunk_bytes)
+                raise oversize_error
+            collected_chunks.append(chunk)
         body_bytes = b"".join(collected_chunks)
     finally:
         with contextlib.suppress(Exception):
@@ -274,25 +262,21 @@ async def fetch_url_pooled(
               and prefix is a status message string
     :raises McpError: If the request fails or returns an error status code
     """
-    # Create SSRF validator and HTTP config
     ssrf_validator = SSRFValidator()
     http_config = HttpConfig(proxy_url=proxy_url)
 
-    # Create session configuration
     session_config = SessionConfig(
         impersonate="chrome",
         proxy_url=proxy_url,
     )
 
     try:
-        # Get session from manager
         session = await session_manager.get_session(session_config)
 
         attempt = 0
         while True:
             attempt += 1
             try:
-                # Execute HTTP request
                 response = await _execute_http_request(
                     url, session, http_config, ssrf_validator
                 )
@@ -310,7 +294,6 @@ async def fetch_url_pooled(
                     )
                 ) from e
 
-        # Validate response and process content
         _validate_http_response(response)
         processed = _process_response_content(response, force_raw)
         return processed.content, processed.prefix
@@ -333,18 +316,15 @@ async def fetch_url_legacy(
               and prefix is a status message string
     :raises McpError: If the request fails or returns an error status code
     """
-    # Create SSRF validator and HTTP config
     ssrf_validator = SSRFValidator()
     http_config = HttpConfig(proxy_url=proxy_url)
 
     async with AsyncSession[Response](impersonate="chrome") as session:
         try:
-            # Execute HTTP request
             response = await _execute_http_request(
                 url, session, http_config, ssrf_validator
             )
 
-            # Validate response and process content
             _validate_http_response(response)
             processed = _process_response_content(response, force_raw)
             return processed.content, processed.prefix
@@ -353,41 +333,6 @@ async def fetch_url_legacy(
             raise McpError(
                 ErrorData(code=INTERNAL_ERROR, message=f"Failed to fetch {url}: {e!r}")
             )
-
-
-# Backward compatibility wrapper - will be used by serve() function
-async def fetch_url(
-    url: str, force_raw: bool = False, proxy_url: str | None = None
-) -> tuple[str, str]:
-    """Backward compatibility wrapper for fetch_url.
-
-    This function is used by the serve() function handlers and will be updated
-    to use SessionManager via dependency injection.
-    """
-    # This will be replaced by the session manager when serve() is updated
-    return await fetch_url_legacy(url, force_raw, proxy_url)
-
-
-# Backward compatibility wrapper for existing process_content function
-def process_content(
-    page_raw: str, response: Response, force_raw: bool
-) -> tuple[str, str]:
-    """Legacy content processing function for backward compatibility.
-
-    :param page_raw: Raw page content
-    :param response: HTTP response object
-    :param force_raw: Whether to skip HTML processing
-    :returns: Tuple of (processed_content, prefix_message)
-    """
-    # Convert to HttpResponse format and use new processing function
-    http_response = HttpResponse(
-        content=page_raw,
-        status_code=response.status_code,
-        headers=_filter_headers(cast(Mapping[str, str | None], response.headers)),
-        url=response.url,
-    )
-    processed = _process_response_content(http_response, force_raw)
-    return processed.content, processed.prefix
 
 
 class Fetch(BaseModel):
@@ -494,12 +439,8 @@ This tool uses Chrome browser impersonation to access websites that might otherw
             raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
 
         url = str(args.url)
-        if not url:
-            raise McpError(ErrorData(code=INVALID_PARAMS, message="URL is required"))
 
-        content, prefix = await fetch_with_session_manager(
-            url, force_raw=args.raw, proxy_url_override=proxy_url
-        )
+        content, prefix = await fetch_with_session_manager(url, force_raw=args.raw)
         original_length = len(content)
         if args.start_index >= original_length:
             content = "<error>No more content available.</error>"
@@ -539,9 +480,7 @@ This tool uses Chrome browser impersonation to access websites that might otherw
 
         url = str(args.url)
         try:
-            content, prefix = await fetch_with_session_manager(
-                url, proxy_url_override=proxy_url
-            )
+            content, prefix = await fetch_with_session_manager(url)
             # TODO: after SDK bug is addressed, don't catch the exception
         except McpError as e:
             return GetPromptResult(

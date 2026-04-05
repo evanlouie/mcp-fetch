@@ -13,7 +13,6 @@ from .server import (
     _validate_http_response,
     fetch_url_legacy,
     fetch_url_pooled,
-    process_content,
     MAX_RESPONSE_BODY_SIZE,
 )
 
@@ -574,28 +573,6 @@ class TestIntegration:
             assert mock_execute.call_count == 2
             assert mock_session_manager.get_session.call_count == 2
             assert mock_session_manager.handle_request_error.await_count == 2
-
-    def test_process_content_legacy_wrapper(self):
-        """Test the backward compatibility wrapper for process_content."""
-
-        # Mock curl_cffi Response object
-        mock_response = Mock()
-        mock_response.status_code = 200
-        mock_response.headers = {
-            "content-type": "text/html",
-            "server": "nginx",
-            "cache-control": None,  # Test None value filtering
-        }
-        mock_response.url = "https://example.com"
-
-        page_raw = "<html><body><h1>Test</h1></body></html>"
-
-        content, prefix = process_content(page_raw, mock_response, force_raw=True)
-
-        # Should return raw content when force_raw=True
-        assert content == page_raw
-        assert "text/html" in prefix
-        assert "raw content" in prefix
 
     @pytest.mark.asyncio
     async def test_error_classification_integration(self):
